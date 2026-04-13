@@ -1,0 +1,43 @@
+@import "tailwindcss";
+
+:root {
+  /* Imperial College London: Imperial Blue #003E74, Navy #002147, white */
+  --background: #ffffff;
+  --foreground: #002147;
+  --surface: #ffffff;
+  --brand: #003e74;
+  --brand-deep: #002147;
+  --accent: #003e74;
+  --muted: #3d4f5c;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-surface: var(--surface);
+  --color-brand: var(--brand);
+  --color-brand-deep: var(--brand-deep);
+  --color-accent: var(--accent);
+  --color-muted: var(--muted);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    /* Navy page, Imperial Blue surfaces; slightly lighter blue for controls (contrast on #002147 / #003E74) */
+    --background: #002147;
+    --foreground: #ffffff;
+    --surface: #003e74;
+    --brand: #3d9edf;
+    --brand-deep: #003e74;
+    --accent: #8fc5ea;
+    --muted: #a8bfd2;
+  }
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-geist-sans), system-ui, sans-serif;
+}
