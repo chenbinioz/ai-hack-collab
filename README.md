@@ -43,6 +43,7 @@ graph TD
     S_Table -->|Matrix Data| FastAPI[FastAPI Engine]
     FastAPI -->|Pairwise Match| S_Table
     S_Table -->|Display Match| Frontend[Next.js UI]
+```
 ## 📊 The Matching Matrix
 Our algorithm evaluates students based on three distinct categories:
 
