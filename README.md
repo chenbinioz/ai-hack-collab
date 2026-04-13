@@ -6,6 +6,69 @@ Language Python, API framework FastAPI, Database SQLite, AI matching Claude API,
 
 This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
 
+# [AI-HACK-COLLAB]
+### Team: [Cohort Connect]
+
+## 🌍 Grand Challenge Addressed
+**Challenge:** Enhancing Collaborative Learning in Higher Education.
+This project addresses the difficulty of forming effective, balanced student study groups or project pairs. By reducing "team friction" and maximizing "skill diversity," we aim to improve student retention and performance in complex subjects.
+
+## 💡 Problem Statement & Solution Overview
+**Problem:** Students often pair up based on friendship rather than complementary skills, or are paired randomly by instructors, leading to imbalanced workloads and personality clashes.
+**Solution:** A data-driven peer-matching platform. Using a multi-page survey, we capture student confidence across various domains and their preferred working styles. Our matching engine uses **Cosine Similarity** to ensure students share a "working vibe" while maintaining a **Skill Gap** to encourage peer-to-peer teaching.
+
+## 🛠 Technology Stack & Architecture
+### Frontend 
+- **Next.js (React):** A modern framework for the user dashboard and onboarding survey.
+- **Tailwind CSS:** For a clean, responsive, and accessible interface.
+
+### Backend & Data 
+- **Supabase (PostgreSQL):** Handles data storage, user authentication, and secure row-level access.
+- **FastAPI (Python):** Orchestrates the matching logic and communicates between the UI and the DB.
+- **NumPy & Scikit-learn:** Performs the mathematical vectorization for the matching algorithm.
+
+### Architecture Diagram
+
+1. **User Auth:** Managed via Supabase Auth.
+2. **Database:** Automated profile creation via PostgreSQL Triggers.
+3. **Logic:** FastAPI pulls student vectors, calculates compatibility, and pushes match IDs back to Supabase.
+
+## 🚀 Installation and Setup Instructions
+
+### 1. Database Setup (Supabase)
+1. Create a new project in [Supabase](https://supabase.com).
+2. Navigate to the **SQL Editor** and run the provided `schema.sql` script (this creates the `student_profiles` table, triggers, and RLS policies).
+3. Disable "Email Confirmation" in **Authentication > Providers** for easier testing during development.
+
+### 2. Backend Setup (FastAPI)
+1. Navigate to the `/backend` folder.
+2. Install dependencies: `pip install fastapi uvicorn supabase python-dotenv numpy scikit-learn`.
+3. Create a `.env` file and add your `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY`.
+4. Run the server: `uvicorn main:app --reload`.
+
+### 3. Frontend Setup (Next.js)
+1. Navigate to the `/frontend` folder.
+2. Install dependencies: `npm install`.
+3. Create a `.env.local` file with your `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_ANON_KEY`.
+4. Run the app: `npm run dev`.
+
+## 📖 Usage Guide
+1. **Sign Up:** Create a student account.
+2. **Onboarding Survey:** Complete the 3-page survey covering demographics, confidence levels, and approach to work.
+3. **Dashboard:** Once submitted, your profile is "Locked" and the matching engine pairs you with a classmate.
+4. **View Match:** See your partner’s contact info and the "Match Reason" explaining why you were paired.
+
+## 🎥 Demo Video
+[Link to your YouTube/Loom/Drive Video Demo]
+
+## 👥 Team Member Details and Contributions
+- **[Your Name] (Data Lead):** Database architecture, SQL trigger automation, RLS security policies, and data schema design.
+- **[Teammate 1] (Frontend Lead):** Next.js UI development, survey form logic, and API integration.
+- **[Teammate 2] (Backend Lead):** FastAPI matching engine, algorithm implementation, and server-side logic.
+
+## 📜 License Information
+This project is licensed under the **MIT License** - see the LICENSE file for details.
+
 ## Getting Started
 
 First, run the development server:
