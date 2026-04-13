@@ -1,5 +1,5 @@
 const DEFAULT_STUDENT_AFTER_LOGIN = "/student";
-const DEFAULT_EDUCATOR_AFTER_LOGIN = "/educator/overview";
+const DEFAULT_EDUCATOR_AFTER_LOGIN = "/educator/survey-results";
 
 /**
  * Allow only same-origin relative paths (avoids open redirects after login).
