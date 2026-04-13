@@ -1,4 +1,5 @@
 import type { SVGProps } from "react";
+import Link from "next/link";
 
 function IconBook(props: SVGProps<SVGSVGElement>) {
   return (
@@ -48,12 +49,12 @@ export default function Home() {
     <div className="flex min-h-full flex-col">
       <header className="sticky top-0 z-50 border-b border-black/5 bg-surface/80 backdrop-blur-md dark:border-white/10">
         <div className="mx-auto flex h-16 max-w-6xl items-center justify-between gap-4 px-4 sm:px-6">
-          <a href="/" className="flex items-center gap-2 font-semibold tracking-tight text-foreground">
+          <Link href="/" className="flex items-center gap-2 font-semibold tracking-tight text-foreground">
             <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-linear-to-br from-brand to-brand-deep text-white shadow-sm">
               <IconSpark className="h-5 w-5" />
             </span>
             <span>Cohort Connect</span>
-          </a>
+          </Link>
           <nav className="hidden items-center gap-8 text-sm font-medium text-muted md:flex" aria-label="Primary">
             <a href="#how" className="transition-colors hover:text-foreground">
               How it works
@@ -65,16 +66,22 @@ export default function Home() {
               For educators
             </a>
           </nav>
-          <div className="flex shrink-0 items-center gap-2">
-            <a
-              href="#account"
-              className="hidden rounded-lg px-3 py-2 text-sm font-medium text-muted transition-colors hover:text-foreground sm:inline"
+          <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
+            <Link
+              href="/login/student"
+              className="rounded-lg px-3 py-2 text-xs font-medium text-muted transition-colors hover:text-foreground sm:text-sm"
             >
-              Sign in
-            </a>
+              Student log in
+            </Link>
+            <Link
+              href="/login/educator"
+              className="rounded-lg px-3 py-2 text-xs font-medium text-muted transition-colors hover:text-foreground sm:text-sm"
+            >
+              Educator log in
+            </Link>
             <a
               href="#get-started"
-              className="rounded-lg bg-brand px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-brand-deep"
+              className="rounded-lg bg-brand px-3 py-2 text-xs font-semibold text-white shadow-sm transition hover:bg-brand-deep sm:px-4 sm:text-sm"
             >
               Get started
             </a>
@@ -289,19 +296,25 @@ export default function Home() {
                 Fairer groups start with better signals. Join when your institution enables Cohort Connect, or ask
                 your module lead to get in touch.
               </p>
-              <div className="mt-8 flex flex-col items-center justify-center gap-3 sm:flex-row">
-                <a
-                  href="#get-started"
+              <div className="mt-8 flex flex-col items-center justify-center gap-3 sm:flex-row sm:flex-wrap">
+                <Link
+                  href="/signup/student"
                   className="inline-flex h-12 min-w-[200px] items-center justify-center rounded-xl bg-white px-8 text-base font-semibold text-brand-deep transition hover:bg-white/95"
                 >
                   Create account
-                </a>
-                <a
-                  href="#join"
+                </Link>
+                <Link
+                  href="/login/student"
                   className="inline-flex h-12 min-w-[200px] items-center justify-center rounded-xl border-2 border-white/40 bg-white/10 px-8 text-base font-semibold text-white backdrop-blur-sm transition hover:bg-white/20"
                 >
-                  Institution sign in
-                </a>
+                  Student log in
+                </Link>
+                <Link
+                  href="/login/educator"
+                  className="inline-flex h-12 min-w-[200px] items-center justify-center rounded-xl border-2 border-white/40 bg-white/10 px-8 text-base font-semibold text-white backdrop-blur-sm transition hover:bg-white/20"
+                >
+                  Educator log in
+                </Link>
               </div>
             </div>
           </div>
