@@ -91,12 +91,14 @@ cd backend
 pip install -r requirements.txt
 # Add SUPABASE_URL and SERVICE_ROLE_KEY to .env
 uvicorn main:app --reload
+```
 ### 3. Frontend Setup
 ```bash
 cd frontend
 npm install
 # Add NEXT_PUBLIC_SUPABASE_URL and ANON_KEY to .env.local
 npm run dev
+```
 ## 📖 Usage Guide
 1. **Onboarding:** Students sign up and are automatically routed to the student database.
 
