@@ -6,68 +6,126 @@ Language Python, API framework FastAPI, Database SQLite, AI matching Claude API,
 
 This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
 
-# [AI-HACK-COLLAB]
-### Team: [Cohort Connect]
+Cohort Connect
+Team: Cohort Connect
+Grand Challenge: AI Agents for Matching Learners with Learners
 
-## 🌍 Grand Challenge Addressed
-**Challenge:** Enhancing Collaborative Learning in Higher Education.
-This project addresses the difficulty of forming effective, balanced student study groups or project pairs. By reducing "team friction" and maximizing "skill diversity," we aim to improve student retention and performance in complex subjects.
+🌍 Grand Challenge Addressed
+In university settings—ranging from high-stakes labs to complex mathematics coursework—group formation is often the weakest link. Random Allocation leads to "Communication Friction" (clashing work styles), while Self-Selection leads to "Skill Silos" (friends with identical strengths pairing up).
 
-## 💡 Problem Statement & Solution Overview
-**Problem:** Students often pair up based on friendship rather than complementary skills, or are paired randomly by instructors, leading to imbalanced workloads and personality clashes.
-**Solution:** A data-driven peer-matching platform. Using a multi-page survey, we capture student confidence across various domains and their preferred working styles. Our matching engine uses **Cosine Similarity** to ensure students share a "working vibe" while maintaining a **Skill Gap** to encourage peer-to-peer teaching.
+Cohort Connect solves this by using an algorithmic approach to group formation that ensures students share a common "work vibe" while possessing the diverse skills necessary to complete multifaceted projects.
 
-## 🛠 Technology Stack & Architecture
-### Frontend 
-- **Next.js (React):** A modern framework for the user dashboard and onboarding survey.
-- **Tailwind CSS:** For a clean, responsive, and accessible interface.
+💡 Problem Statement & Solution Overview
+The Problem: Inefficient group work stems from two main issues:
 
-### Backend & Data 
-- **Supabase (PostgreSQL):** Handles data storage, user authentication, and secure row-level access.
-- **FastAPI (Python):** Orchestrates the matching logic and communicates between the UI and the DB.
-- **NumPy & Scikit-learn:** Performs the mathematical vectorization for the matching algorithm.
+Approach Incompatibility: Teammates who communicate or handle deadlines in fundamentally different ways.
 
-### Architecture Diagram
+Skill Homogeneity: Groups that lack specific technical or soft skills (e.g., a team of great coders who cannot write reports).
 
-1. **User Auth:** Managed via Supabase Auth.
-2. **Database:** Automated profile creation via PostgreSQL Triggers.
-3. **Logic:** FastAPI pulls student vectors, calculates compatibility, and pushes match IDs back to Supabase.
+The Solution: An intelligent matchmaking agent that processes student profiles into a multidimensional matrix. It applies Alignment Logic (seeking small differences) for work approaches and Complementary Logic (seeking large differences) for technical skills.
 
-## 🚀 Installation and Setup Instructions
+🛠 Technology Stack & Architecture
+Backend & Data
+Supabase (PostgreSQL): A relational database utilizing a dual-table structure (student_profiles and teacher_profiles) with automated routing via SQL Triggers.
 
-### 1. Database Setup (Supabase)
-1. Create a new project in [Supabase](https://supabase.com).
-2. Navigate to the **SQL Editor** and run the provided `schema.sql` script (this creates the `student_profiles` table, triggers, and RLS policies).
-3. Disable "Email Confirmation" in **Authentication > Providers** for easier testing during development.
+FastAPI (Python): The engine that processes the pairwise matrix and calculates match scores.
 
-### 2. Backend Setup (FastAPI)
-1. Navigate to the `/backend` folder.
-2. Install dependencies: `pip install fastapi uvicorn supabase python-dotenv numpy scikit-learn`.
-3. Create a `.env` file and add your `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY`.
-4. Run the server: `uvicorn main:app --reload`.
+Row Level Security (RLS): Industry-standard security ensuring students only access their own data and their assigned match.
 
-### 3. Frontend Setup (Next.js)
-1. Navigate to the `/frontend` folder.
-2. Install dependencies: `npm install`.
-3. Create a `.env.local` file with your `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_ANON_KEY`.
-4. Run the app: `npm run dev`.
+Frontend
+Next.js: A responsive React framework for the onboarding survey and student dashboard.
 
-## 📖 Usage Guide
-1. **Sign Up:** Create a student account.
-2. **Onboarding Survey:** Complete the 3-page survey covering demographics, confidence levels, and approach to work.
-3. **Dashboard:** Once submitted, your profile is "Locked" and the matching engine pairs you with a classmate.
-4. **View Match:** See your partner’s contact info and the "Match Reason" explaining why you were paired.
+Tailwind CSS: For modern, accessible UI design.
 
-## 🎥 Demo Video
-[Link to your YouTube/Loom/Drive Video Demo]
+🏗 Architecture Diagram
+Code snippet
+graph TD
+    User((User)) -->|Sign Up| Auth[Supabase Auth]
+    Auth -->|Trigger| Router{SQL Router}
+    Router -->|Student| S_Table[(Student Profiles)]
+    Router -->|Teacher| T_Table[(Teacher Profiles)]
+    
+    S_Table -->|Matrix Data| FastAPI[FastAPI Engine]
+    FastAPI -->|Pairwise Match| S_Table
+    S_Table -->|Display Match| Frontend[Next.js UI]
+📊 The Matching Matrix
+Our algorithm evaluates students based on three distinct categories:
 
-## 👥 Team Member Details and Contributions
-- **[Your Name] (Data Lead):** Database architecture, SQL trigger automation, RLS security policies, and data schema design.
-- **[Teammate 1] (Frontend Lead):** Next.js UI development, survey form logic, and API integration.
-- **[Teammate 2] (Backend Lead):** FastAPI matching engine, algorithm implementation, and server-side logic.
+1. Previous Subject Experience
+A-Level (or equivalent) Background: Used to identify baseline knowledge.
 
-## 📜 License Information
-This project is licensed under the **MIT License** - see the LICENSE file for details.
+Ancillary Modules: Used to ensure groups have a diverse academic reach.
+
+2. Relevant Skills (Complementary Matching)
+Students are paired to ensure the group has high confidence (4-5) across all domains:
+
+Coding & Mathematical Literacy
+
+Written Reports & Presentation/Public Speaking
+
+Abstract/Complex Content Comprehension & Conflict Resolution
+
+3. Approach to Work (Alignment Matching)
+Students are paired based on similar scores to reduce friction:
+
+Deadline Style: Steady workers vs. Under-pressure performers.
+
+Communication: Frequent/Informal vs. Structured/Formal.
+
+Learning Style: Individual vs. Collaborative concept-processing.
+
+Conflict & Feedback: Direct address vs. Confrontation avoidance; Defensive vs. Receptive to feedback.
+
+🚀 Installation and Setup
+Prerequisites
+Node.js: [Insert Version, e.g., 18.x]
+
+Python: [Insert Version, e.g., 3.10+]
+
+Supabase Account
+
+1. Database Setup
+Create a new Supabase project.
+
+Run the schema.sql script located in the /database folder.
+
+This will initialize the tables, the user_role types, and the handle_new_auth_user_routing trigger.
+
+2. Backend Setup
+Bash
+cd backend
+pip install -r requirements.txt
+# Add SUPABASE_URL and SERVICE_ROLE_KEY to .env
+uvicorn main:app --reload
+3. Frontend Setup
+Bash
+cd frontend
+npm install
+# Add NEXT_PUBLIC_SUPABASE_URL and ANON_KEY to .env.local
+npm run dev
+📖 Usage Guide
+Onboarding: Students sign up and are automatically routed to the student database.
+
+The Survey: Students complete a three-part survey to build their matrix profile.
+
+Submission: Upon completion, the profile is "Locked" to ensure data integrity for the matching algorithm.
+
+Match Discovery: Once the teacher initiates a match, students can view their partner, their partner's skills, and a "Match Reason" generated by the agent.
+
+🤖 Future Feature: Collaboration Coach
+[Space reserved for the Collaboration Coach agent: A tool to identify group friction via periodic reflection check-ins.]
+🎥 Demo Video
+[Link to Demo Video Here]
+
+👥 Team Member Details and Contributions
+[Insert Name] (Data Lead): Designed the relational schema, SQL triggers for automated student/teacher routing, RLS security policies, and the data-locking mechanism.
+
+[Insert Name] (Frontend Lead): Developed the Next.js UI, multi-page survey logic, and Supabase Auth integration.
+
+[Insert Name] (Backend/Algorithm Lead): Developed the FastAPI engine and the pairwise matrix comparison algorithm.
+
+📜 License Information
+This project is licensed under the MIT License.
 
 ## Getting Started
 
