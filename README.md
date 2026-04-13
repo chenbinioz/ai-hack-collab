@@ -6,39 +6,34 @@ Language Python, API framework FastAPI, Database SQLite, AI matching Claude API,
 
 This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
 
-Cohort Connect
-Team: Cohort Connect
-Grand Challenge: AI Agents for Matching Learners with Learners
+markdown_content = """# Cohort Connect
+### Team: Cohort Connect
+**Grand Challenge:** AI Agents for Matching Learners with Learners
 
-🌍 Grand Challenge Addressed
-In university settings—ranging from high-stakes labs to complex mathematics coursework—group formation is often the weakest link. Random Allocation leads to "Communication Friction" (clashing work styles), while Self-Selection leads to "Skill Silos" (friends with identical strengths pairing up).
+## 🌍 Grand Challenge Addressed
+In university settings—ranging from high-stakes labs to complex mathematics coursework—group formation is often the weakest link. **Random Allocation** leads to "Communication Friction" (clashing work styles), while **Self-Selection** leads to "Skill Silos" (friends with identical strengths pairing up). 
 
-Cohort Connect solves this by using an algorithmic approach to group formation that ensures students share a common "work vibe" while possessing the diverse skills necessary to complete multifaceted projects.
+**Cohort Connect** solves this by using an algorithmic approach to group formation that ensures students share a common "work vibe" while possessing the diverse skills necessary to complete multifaceted projects.
 
-💡 Problem Statement & Solution Overview
-The Problem: Inefficient group work stems from two main issues:
+## 💡 Problem Statement & Solution Overview
+**The Problem:** Inefficient group work stems from two main issues:
+1. **Approach Incompatibility:** Teammates who communicate or handle deadlines in fundamentally different ways.
+2. **Skill Homogeneity:** Groups that lack specific technical or soft skills (e.g., a team of great coders who cannot write reports).
 
-Approach Incompatibility: Teammates who communicate or handle deadlines in fundamentally different ways.
+**The Solution:** An intelligent matchmaking agent that processes student profiles into a multidimensional matrix. It applies **Alignment Logic** (seeking small differences) for work approaches and **Complementary Logic** (seeking large differences) for technical skills.
 
-Skill Homogeneity: Groups that lack specific technical or soft skills (e.g., a team of great coders who cannot write reports).
+## 🛠 Technology Stack & Architecture
+### Backend & Data
+* **Supabase (PostgreSQL):** A relational database utilizing a dual-table structure (`student_profiles` and `teacher_profiles`) with automated routing via SQL Triggers.
+* **FastAPI (Python):** The engine that processes the pairwise matrix and calculates match scores.
+* **Row Level Security (RLS):** Industry-standard security ensuring students only access their own data and their assigned match.
 
-The Solution: An intelligent matchmaking agent that processes student profiles into a multidimensional matrix. It applies Alignment Logic (seeking small differences) for work approaches and Complementary Logic (seeking large differences) for technical skills.
+### Frontend
+* **Next.js:** A responsive React framework for the onboarding survey and student dashboard.
+* **Tailwind CSS:** For modern, accessible UI design.
 
-🛠 Technology Stack & Architecture
-Backend & Data
-Supabase (PostgreSQL): A relational database utilizing a dual-table structure (student_profiles and teacher_profiles) with automated routing via SQL Triggers.
-
-FastAPI (Python): The engine that processes the pairwise matrix and calculates match scores.
-
-Row Level Security (RLS): Industry-standard security ensuring students only access their own data and their assigned match.
-
-Frontend
-Next.js: A responsive React framework for the onboarding survey and student dashboard.
-
-Tailwind CSS: For modern, accessible UI design.
-
-🏗 Architecture Diagram
-Code snippet
+### 🏗 Architecture Diagram
+```mermaid
 graph TD
     User((User)) -->|Sign Up| Auth[Supabase Auth]
     Auth -->|Trigger| Router{SQL Router}
@@ -48,83 +43,83 @@ graph TD
     S_Table -->|Matrix Data| FastAPI[FastAPI Engine]
     FastAPI -->|Pairwise Match| S_Table
     S_Table -->|Display Match| Frontend[Next.js UI]
-📊 The Matching Matrix
+## 📊 The Matching Matrix
 Our algorithm evaluates students based on three distinct categories:
 
-1. Previous Subject Experience
-A-Level (or equivalent) Background: Used to identify baseline knowledge.
+### 1. Previous Subject Experience
+* **A-Level (or equivalent) Background:** List of subject choices to identify baseline knowledge.
+* **Ancillary Modules:** Ancillary module choices to ensure academic diversity within groups.
 
-Ancillary Modules: Used to ensure groups have a diverse academic reach.
+### 2. Relevant Skills (Complementary Matching)
+Students are paired to ensure the group has high confidence (**4-5**) across all domains:
+* **Coding** (1-5 confidence)
+* **Written Reports** (1-5 confidence)
+* **Presentation/Public Speaking** (1-5 confidence)
+* **Mathematical Literacy** (1-5 confidence)
+* **Understanding Abstract/Complex Content** (1-5 confidence)
+* **Conflict Resolution** (1-5 confidence)
 
-2. Relevant Skills (Complementary Matching)
-Students are paired to ensure the group has high confidence (4-5) across all domains:
-
-Coding & Mathematical Literacy
-
-Written Reports & Presentation/Public Speaking
-
-Abstract/Complex Content Comprehension & Conflict Resolution
-
-3. Approach to Work (Alignment Matching)
+### 3. Approach to Work (Alignment Matching)
 Students are paired based on similar scores to reduce friction:
+* **Deadline Style:** Steady workers (**1**) vs. Under-pressure performers (**5**).
+* **Discussion Style:** Listeners (**1**) vs. Leaders (**5**). *Note: This should be matched for alignment, not extreme bias.*
+* **Disagreement Resolution:** Address issues directly (**1**) vs. Avoidance to prevent confrontation (**5**).
+* **Concept Processing:** Independent work (**1**) vs. Collaborative work (**5**).
+* **Communication Preference:** Frequent/Informal (**1**) vs. Structured/Formal (**5**).
+* **Expectation Management:** Do it myself (**1**) vs. Discuss with teammate (**5**).
+* **Workload Management:** Independent management (**1**) vs. Team redistribution (**5**).
+* **Project Role:** Focused individual tasks (**1**) vs. Group coordination (**5**).
+* **Critical Feedback Instinct:** Defensive/Explaining (**1**) vs. Listening/Revising (**5**).
 
-Deadline Style: Steady workers vs. Under-pressure performers.
+---
 
-Communication: Frequent/Informal vs. Structured/Formal.
+## 🚀 Installation and Setup
+### Prerequisites
+* **Node.js:** [Insert Version]
+* **Python:** [Insert Version]
+* **Supabase Account**
 
-Learning Style: Individual vs. Collaborative concept-processing.
+### 1. Database Setup
+1. Create a new Supabase project.
+2. Run the `schema.sql` script located in the `/database` folder.
+3. This will initialize the tables, the `user_role` types, and the `handle_new_auth_user_routing` trigger.
 
-Conflict & Feedback: Direct address vs. Confrontation avoidance; Defensive vs. Receptive to feedback.
-
-🚀 Installation and Setup
-Prerequisites
-Node.js: [Insert Version, e.g., 18.x]
-
-Python: [Insert Version, e.g., 3.10+]
-
-Supabase Account
-
-1. Database Setup
-Create a new Supabase project.
-
-Run the schema.sql script located in the /database folder.
-
-This will initialize the tables, the user_role types, and the handle_new_auth_user_routing trigger.
-
-2. Backend Setup
-Bash
+### 2. Backend Setup
+```bash
 cd backend
 pip install -r requirements.txt
 # Add SUPABASE_URL and SERVICE_ROLE_KEY to .env
 uvicorn main:app --reload
-3. Frontend Setup
-Bash
+### 3. Frontend Setup
+```bash
 cd frontend
 npm install
 # Add NEXT_PUBLIC_SUPABASE_URL and ANON_KEY to .env.local
 npm run dev
-📖 Usage Guide
-Onboarding: Students sign up and are automatically routed to the student database.
+## 📖 Usage Guide
+1. **Onboarding:** Students sign up and are automatically routed to the student database.
 
-The Survey: Students complete a three-part survey to build their matrix profile.
+2. **The Survey:** Students complete a three-part survey to build their matrix profile.
 
-Submission: Upon completion, the profile is "Locked" to ensure data integrity for the matching algorithm.
+3. **Submission:** Upon completion, the profile is "Locked" to ensure data integrity for the matching algorithm.
 
-Match Discovery: Once the teacher initiates a match, students can view their partner, their partner's skills, and a "Match Reason" generated by the agent.
+4. **Match Discovery:** Once the teacher initiates a match, students can view their partner, their partner's skills, and a "Match Reason" generated by the agent.
 
 🤖 Future Feature: Collaboration Coach
 [Space reserved for the Collaboration Coach agent: A tool to identify group friction via periodic reflection check-ins.]
-🎥 Demo Video
+**🎥 Demo Video**
 [Link to Demo Video Here]
 
-👥 Team Member Details and Contributions
-[Insert Name] (Data Lead): Designed the relational schema, SQL triggers for automated student/teacher routing, RLS security policies, and the data-locking mechanism.
+## 👥 Team Member Details and Contributions
+* **[Insert Name] (Data Lead):** Designed the relational schema, SQL triggers for automated student/teacher routing, RLS security policies, and the data-locking mechanism.
 
-[Insert Name] (Frontend Lead): Developed the Next.js UI, multi-page survey logic, and Supabase Auth integration.
+* **[Insert Name] (Frontend Lead):** Developed the Next.js UI, multi-page survey logic, and Supabase Auth integration.
 
-[Insert Name] (Backend/Algorithm Lead): Developed the FastAPI engine and the pairwise matrix comparison algorithm.
+* **[Insert Name] (Backend/Algorithm Lead):** Developed the FastAPI engine and the pairwise matrix comparison algorithm.
 
-📜 License Information
+* **[Insert Name] (Creative Lead):** Generated ideas for survey, presentation slides, monitoring the integration of frontend, backend and data.
+
+## 📜 License Information
 This project is licensed under the MIT License.
 
 ## Getting Started
