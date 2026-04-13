@@ -23,7 +23,7 @@ export function StudentHomeView() {
     setIsStudentSigningOut(true);
     try {
       await signOutStudent();
-      router.replace("/login");
+      router.replace("/");
       router.refresh();
     } catch {
       setIsStudentSigningOut(false);

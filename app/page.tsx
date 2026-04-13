@@ -310,6 +310,12 @@ export default function Home() {
                   Student log in
                 </Link>
                 <Link
+                  href="/signup/educator"
+                  className="inline-flex h-12 min-w-[200px] items-center justify-center rounded-xl border-2 border-white/40 bg-white/10 px-8 text-base font-semibold text-white backdrop-blur-sm transition hover:bg-white/20"
+                >
+                  Educator sign up
+                </Link>
+                <Link
                   href="/login/educator"
                   className="inline-flex h-12 min-w-[200px] items-center justify-center rounded-xl border-2 border-white/40 bg-white/10 px-8 text-base font-semibold text-white backdrop-blur-sm transition hover:bg-white/20"
                 >

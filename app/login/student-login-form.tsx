@@ -3,11 +3,12 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { SupabaseEnvMissingBanner } from "@/components/supabase-env-missing-banner";
+import { signInEducator } from "@/lib/auth/educator-auth";
 import { signInStudent } from "@/lib/auth/student-auth";
-import { getSafeStudentRedirectPath } from "@/lib/auth/student-redirect";
+import { getSafeRedirectPath } from "@/lib/auth/student-redirect";
 import { hasStudentSupabaseEnv } from "@/lib/supabase/student-env";
 
-function formatStudentSignInErrorMessage(message: string): string {
+function formatSignInErrorMessage(message: string, variant: StudentLoginFormVariant): string {
   const lower = message.toLowerCase();
   if (
     lower.includes("invalid login credentials") ||
@@ -20,10 +21,16 @@ function formatStudentSignInErrorMessage(message: string): string {
     return "Confirm your email address before signing in.";
   }
   if (lower.includes("infinite recursion")) {
+    if (variant === "educator") {
+      return "Database RLS issue on teacher_profiles: run supabase/migrations/006_teacher_profiles_and_auth_role_trigger.sql in the Supabase SQL Editor, then sign in again.";
+    }
     return "Database RLS issue: run supabase/migrations/003_fix_student_profiles_rls_recursion.sql in the Supabase SQL Editor, then sign in again.";
   }
   if (lower.includes("student_profile_exists") && lower.includes("does not exist")) {
     return "Missing database function: run supabase/migrations/003_fix_student_profiles_rls_recursion.sql in the Supabase SQL Editor, then sign in again.";
+  }
+  if (variant === "educator" && lower.includes("teacher_profile_exists") && lower.includes("does not exist")) {
+    return "Missing database function: run supabase/migrations/006_teacher_profiles_and_auth_role_trigger.sql in the Supabase SQL Editor, then sign in again.";
   }
   return message;
 }
@@ -35,11 +42,13 @@ export function StudentLoginForm({
   studentRedirectAfterLogin,
 }: {
   studentLoginFormVariant: StudentLoginFormVariant;
-  /** Post-login path; must be a safe relative path (see getSafeStudentRedirectPath). */
+  /** Post-login path; must be a safe relative path (see getSafeRedirectPath). */
   studentRedirectAfterLogin?: string;
 }) {
   const router = useRouter();
-  const afterStudentLogin = getSafeStudentRedirectPath(studentRedirectAfterLogin);
+  const postLoginFallback =
+    studentLoginFormVariant === "educator" ? "/educator/overview" : "/student";
+  const afterLogin = getSafeRedirectPath(studentRedirectAfterLogin, postLoginFallback);
   const copy =
     studentLoginFormVariant === "student"
       ? "Sign in with your student account to join cohorts and view your groups."
@@ -67,14 +76,17 @@ export function StudentLoginForm({
 
     setIsStudentSigningIn(true);
     try {
-      const { error: signInStudentError } = await signInStudent(trimmedStudentEmail, studentPassword, {
-        enforceStudentProfileRow: studentLoginFormVariant === "student",
-      });
-      if (signInStudentError) {
-        setStudentSignInError(formatStudentSignInErrorMessage(signInStudentError.message));
+      const signInResult =
+        studentLoginFormVariant === "educator"
+          ? await signInEducator(trimmedStudentEmail, studentPassword)
+          : await signInStudent(trimmedStudentEmail, studentPassword, {
+              enforceStudentProfileRow: true,
+            });
+      if (signInResult.error) {
+        setStudentSignInError(formatSignInErrorMessage(signInResult.error.message, studentLoginFormVariant));
         return;
       }
-      router.replace(afterStudentLogin);
+      router.replace(afterLogin);
       router.refresh();
     } catch {
       setStudentSignInError("Something went wrong. Please try again.");
