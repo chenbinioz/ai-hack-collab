@@ -45,7 +45,7 @@ export function EducatorSignupForm() {
         return;
       }
       if (data.session) {
-        router.replace("/educator/overview");
+        router.replace("/educator/survey-results");
         router.refresh();
         return;
       }
