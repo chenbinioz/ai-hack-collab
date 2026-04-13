@@ -8,7 +8,7 @@ import { hasStudentSupabaseEnv } from "@/lib/supabase/student-env";
 
 function formatStudentSignupErrorMessage(message: string): string {
   if (message.toLowerCase().includes("database error saving new user")) {
-    return "Sign-up failed inside the database (usually the student_profiles trigger). In Supabase → SQL Editor, paste and run the latest supabase/migrations/002_fix_student_signup.sql from this repo, then try again.";
+    return "Sign-up failed inside the database (usually the auth profile trigger). In Supabase → SQL Editor, run supabase/migrations/002_fix_student_signup.sql and supabase/migrations/006_teacher_profiles_and_auth_role_trigger.sql from this repo, then try again.";
   }
   return message;
 }

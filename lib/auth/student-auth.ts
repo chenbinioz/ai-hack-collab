@@ -43,6 +43,9 @@ export async function signUpStudent(email: string, password: string) {
   return supabase.auth.signUp({
     email: email.trim(),
     password,
+    options: {
+      data: { app_role: "student" },
+    },
   });
 }
 
