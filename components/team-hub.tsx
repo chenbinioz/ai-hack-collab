@@ -20,6 +20,8 @@ export function TeamHub() {
   const [teammates, setTeammates] = useState<Teammate[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [showFeedbackModal, setShowFeedbackModal] = useState(false);
+  const [hasSubmittedFeedback, setHasSubmittedFeedback] = useState(false);
 
   const supabase = createStudentBrowserClient();
 
@@ -59,6 +61,16 @@ export function TeamHub() {
         return;
       }
 
+      // Check if user has already submitted feedback for this team
+      const { data: existingFeedback } = await supabase
+        .from("feedback")
+        .select("id")
+        .eq("student_id", user.id)
+        .eq("team_id", currentUserProfile.team_id)
+        .limit(1);
+
+      setHasSubmittedFeedback(!!(existingFeedback && existingFeedback.length > 0));
+
       // Fetch team details and teammates from our API
       const response = await fetch("http://localhost:8000/educator-data");
       if (!response.ok) {
@@ -80,6 +92,11 @@ export function TeamHub() {
 
       setTeam(teamData);
       setTeammates(teamTeammates);
+
+      // Show feedback modal if team is newly assigned and no feedback submitted yet
+      if (!hasSubmittedFeedback && !existingFeedback?.length) {
+        setShowFeedbackModal(true);
+      }
 
     } catch (err: any) {
       console.error('Error fetching team data:', err);

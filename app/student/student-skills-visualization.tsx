@@ -17,9 +17,9 @@ interface StudentProfile {
 const SKILL_LABELS = {
   survey_confidence_coding: "Coding",
   survey_confidence_written_reports: "Written Reports",
-  survey_confidence_presentation_public_speaking: "Presentation & Public Speaking",
+  survey_confidence_presentation_public_speaking: "Presentation / Public Speaking",
   survey_confidence_mathematical_literacy: "Mathematical Literacy",
-  survey_confidence_abstract_complex_content: "Abstract/Complex Content",
+  survey_confidence_abstract_complex_content: "Understanding Abstract/Complex Content",
   survey_confidence_conflict_resolution: "Conflict Resolution",
 } as const;
 
@@ -128,8 +128,8 @@ export function StudentSkillsVisualization() {
   return (
     <div className="space-y-8">
       <div className="text-center">
-        <h2 className="text-xl font-semibold text-foreground">{profile.survey_name}'s Skills</h2>
-        <p className="mt-2 text-muted">Your confidence levels across different competencies</p>
+        <h2 className="text-xl font-semibold text-foreground">Your Skills</h2>
+        <p className="mt-2 text-muted">Your confidence levels across core skills</p>
       </div>
 
       <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
