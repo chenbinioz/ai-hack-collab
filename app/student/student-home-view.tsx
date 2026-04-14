@@ -1,17 +1,24 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useStudentAuth } from "@/app/providers";
 import { useStudentProfileSurveyStatus } from "@/lib/hooks/use-student-profile-survey-status";
 import { TeamHub } from "@/components/team-hub";
+import { StudentSkillsVisualization } from "./student-skills-visualization";
+
+type TabType = "overview" | "skills";
 
 export function StudentHomeView() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { user, isStudentAuthLoading, signOutStudent } = useStudentAuth();
   const { isLoading: isSurveyStatusLoading, surveyCompleted } = useStudentProfileSurveyStatus();
   const [isStudentSigningOut, setIsStudentSigningOut] = useState(false);
+
+  // Get active tab from URL params, default to overview
+  const activeTab: TabType = (searchParams.get("tab") as TabType) === "skills" ? "skills" : "overview";
 
   const meta = user?.user_metadata;
   const displayName =
@@ -29,6 +36,16 @@ export function StudentHomeView() {
     } catch {
       setIsStudentSigningOut(false);
     }
+  }
+
+  function handleTabChange(tab: TabType) {
+    const params = new URLSearchParams(searchParams);
+    if (tab === "overview") {
+      params.delete("tab");
+    } else {
+      params.set("tab", tab);
+    }
+    router.replace(`/student?${params.toString()}`, { scroll: false });
   }
 
   if (isStudentAuthLoading || !user || isSurveyStatusLoading) {
@@ -64,43 +81,100 @@ export function StudentHomeView() {
           This is your signed-in student home. More tools for cohorts, groups, and coursework will appear here
           soon.
         </p>
-        <section
-          className="mt-10 rounded-2xl border border-black/10 bg-surface p-6 shadow-sm dark:border-white/10 sm:p-8"
-          aria-labelledby="student-profile-survey-heading"
-        >
-          <h2 id="student-profile-survey-heading" className="text-lg font-semibold text-foreground">
-            Student profile survey
-          </h2>
-          <p className="mt-2 text-sm text-muted">
-            Tell us how you work so we can place you thoughtfully in cohorts. You only complete this once.
-          </p>
 
-          {surveyCompleted ? (
-            <div className="mt-6 space-y-3">
-              <button
-                type="button"
-                disabled
-                className="w-full cursor-not-allowed rounded-xl border border-black/10 bg-black/[0.04] px-4 py-3 text-left text-sm font-semibold text-muted opacity-70 dark:border-white/15 dark:bg-white/[0.06]"
+        {/* Tab Navigation */}
+        <div className="mt-8 border-b border-black/10 dark:border-white/10">
+          <nav className="flex space-x-8">
+            <button
+              onClick={() => handleTabChange("overview")}
+              className={`pb-4 px-1 border-b-2 font-medium text-sm transition-colors ${
+                activeTab === "overview"
+                  ? "border-brand text-brand"
+                  : "border-transparent text-muted hover:text-foreground hover:border-black/20"
+              }`}
+            >
+              Overview
+            </button>
+            <button
+              onClick={() => handleTabChange("skills")}
+              className={`pb-4 px-1 border-b-2 font-medium text-sm transition-colors ${
+                activeTab === "skills"
+                  ? "border-brand text-brand"
+                  : "border-transparent text-muted hover:text-foreground hover:border-black/20"
+              }`}
+            >
+              Skills
+            </button>
+          </nav>
+        </div>
+
+        {/* Tab Content */}
+        <div className="mt-8">
+          {activeTab === "overview" && (
+            <>
+              <section
+                className="mb-10 rounded-2xl border border-black/10 bg-surface p-6 shadow-sm dark:border-white/10 sm:p-8"
+                aria-labelledby="student-profile-survey-heading"
               >
-                Student profile survey
-              </button>
-              <p className="text-sm text-muted">
-                You have already submitted your profile survey. Your answers are final and cannot be changed.
-              </p>
-            </div>
-          ) : (
-            <div className="mt-6">
-              <Link
-                href="/student/survey"
-                className="flex w-full items-center justify-center rounded-xl bg-brand px-4 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-brand-deep"
-              >
-                Complete the student profile survey
-              </Link>
+                <h2 id="student-profile-survey-heading" className="text-lg font-semibold text-foreground">
+                  Student profile survey
+                </h2>
+                <p className="mt-2 text-sm text-muted">
+                  Tell us how you work so we can place you thoughtfully in cohorts. You only complete this once.
+                </p>
+
+                {surveyCompleted ? (
+                  <div className="mt-6 space-y-3">
+                    <button
+                      type="button"
+                      disabled
+                      className="w-full cursor-not-allowed rounded-xl border border-black/10 bg-black/[0.04] px-4 py-3 text-left text-sm font-semibold text-muted opacity-70 dark:border-white/15 dark:bg-white/[0.06]"
+                    >
+                      Student profile survey
+                    </button>
+                    <p className="text-sm text-muted">
+                      You have already submitted your profile survey. Your answers are final and cannot be changed.
+                    </p>
+                  </div>
+                ) : (
+                  <div className="mt-6">
+                    <Link
+                      href="/student/survey"
+                      className="flex w-full items-center justify-center rounded-xl bg-brand px-4 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-brand-deep"
+                    >
+                      Complete the student profile survey
+                    </Link>
+                  </div>
+                )}
+              </section>
+
+              <TeamHub />
+            </>
+          )}
+
+          {activeTab === "skills" && (
+            <div className="space-y-8">
+              <div className="text-center">
+                <h2 className="text-xl font-semibold text-foreground">Skills Visualization</h2>
+                <p className="mt-2 text-muted">View your skills profile pictorially</p>
+              </div>
+
+              {!surveyCompleted ? (
+                <div className="rounded-2xl border border-black/10 bg-surface p-8 shadow-sm dark:border-white/10 text-center">
+                  <p className="text-muted mb-4">Complete your profile survey to see your skills visualization.</p>
+                  <Link
+                    href="/student/survey"
+                    className="inline-flex items-center justify-center rounded-xl bg-brand px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-brand-deep"
+                  >
+                    Complete Survey
+                  </Link>
+                </div>
+              ) : (
+                <StudentSkillsVisualization />
+              )}
             </div>
           )}
-        </section>
-
-        <TeamHub />
+        </div>
       </main>
     </div>
   );
