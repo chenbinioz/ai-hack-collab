@@ -1,7 +1,7 @@
 # Grand Challenge 2: Cohort Connect
 This project is designed to address Grand Challenge 2
 
-Problem Statement
+**Problem Statement:
 Current group formation methods priorities convenience over compatibility, leading to inefficient and often unenjoyable experiences. Incompatible matches can lead to isolation, poorer academic performance, and an overall negative perception of group work as a burden rather than an opportunity. 
 
 We all have met this problem before personally, either through skill smbalances between teams, or mismatched work ethics between peer. This has lead in the past to negative experiences, which we believe should never be the case, and cause us to strive to make a difference.
