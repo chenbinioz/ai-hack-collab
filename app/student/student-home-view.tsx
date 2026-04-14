@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useStudentAuth } from "@/app/providers";
 import { useStudentProfileSurveyStatus } from "@/lib/hooks/use-student-profile-survey-status";
+import { TeamHub } from "@/components/team-hub";
 
 export function StudentHomeView() {
   const router = useRouter();
@@ -99,9 +100,7 @@ export function StudentHomeView() {
           )}
         </section>
 
-        <div className="mt-10 rounded-2xl border border-dashed border-black/15 bg-black/[0.02] p-8 text-center dark:border-white/20 dark:bg-white/[0.04]">
-          <p className="text-sm text-muted">Placeholder — upcoming features</p>
-        </div>
+        <TeamHub />
       </main>
     </div>
   );
