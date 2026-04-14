@@ -12,6 +12,69 @@ genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
 # Use a valid free model
 model = genai.GenerativeModel("gemini-2.5-flash")
 
+def get_recent_feedback_patterns():
+    """
+    Fetch recent feedback patterns from the database to inform AI matching.
+    """
+    try:
+        # Import here to avoid circular imports
+        from database import supabase
+
+        if not supabase:
+            return None
+
+        # Get feedback from the last 30 days
+        thirty_days_ago = (datetime.now() - timedelta(days=30)).isoformat()
+
+        response = supabase.table("feedback").select("""
+            team_id,
+            skill_match,
+            style_match,
+            overall_satisfaction,
+            teams(name)
+        """).gte("created_at", thirty_days_ago).execute()
+
+        if not response.data:
+            return None
+
+        # Group by team and calculate averages
+        team_feedback = {}
+        for feedback in response.data:
+            team_id = feedback["team_id"]
+            team_name = feedback.get("teams", {}).get("name", f"Team {team_id[:8]}")
+
+            if team_id not in team_feedback:
+                team_feedback[team_id] = {
+                    "name": team_name,
+                    "skill_match": [],
+                    "style_match": [],
+                    "overall": []
+                }
+
+            team_feedback[team_id]["skill_match"].append(feedback["skill_match"])
+            team_feedback[team_id]["style_match"].append(feedback["style_match"])
+            team_feedback[team_id]["overall"].append(feedback["overall_satisfaction"])
+
+        # Build feedback summary
+        patterns = []
+        for team_id, data in team_feedback.items():
+            avg_skill = sum(data["skill_match"]) / len(data["skill_match"])
+            avg_style = sum(data["style_match"]) / len(data["style_match"])
+            avg_overall = sum(data["overall"]) / len(data["overall"])
+
+            if avg_overall < 3:
+                patterns.append(f"- The last time we paired students in '{data['name']}', the satisfaction was {avg_overall:.1f}/5")
+            elif avg_skill < 3:
+                patterns.append(f"- Students in '{data['name']}' reported low skill match ({avg_skill:.1f}/5)")
+            elif avg_style < 3:
+                patterns.append(f"- Students in '{data['name']}' reported low style match ({avg_style:.1f}/5)")
+
+        return "\n".join(patterns) if patterns else None
+
+    except Exception as e:
+        print(f"Error fetching feedback patterns: {e}")
+        return None
+
 def match_students(students):
     # Extract only essential survey details to reduce prompt size
     cleaned_students = []
