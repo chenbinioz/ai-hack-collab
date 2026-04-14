@@ -47,7 +47,7 @@ graph TD
     Router -->|Teacher| T_Table[(Teacher Profiles)]
     
     S_Table -->|Matrix Data| FastAPI[FastAPI Engine]
-    FastAPI -->|Pairwise Match| S_Table
+    FastAPI -->|AI Match System| S_Table
     S_Table -->|Display Match| Frontend[Next.js UI]
 ```
 ## 📊 The Matching Matrix
@@ -123,7 +123,7 @@ npm run dev
 
 * **Rob Jones (Frontend Lead):** Developed the Next.js UI, multi-page survey logic, and Supabase Auth integration.
 
-* **Adam Fox (Backend/Algorithm Lead):** Developed the FastAPI engine and the pairwise matrix comparison algorithm.
+* **Adam Fox (Backend/Algorithm Lead):** Developed the FastAPI engine and the AI Algorithm for the student match and team creation
 
 * **Zuri Jarvis (Creative Lead):** Generated ideas for survey, presentation slides, monitoring the integration of frontend, backend and data.
 
