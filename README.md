@@ -44,6 +44,7 @@ In university settings, which range from high-stakes labs to complex mathematics
 | **Version Control** | GitHub | Collaborative development and CI/CD. |
 
 ### 🏗 Architecture Diagram
+```
 graph TD
     A[Student/Teacher Browser] -->|Next.js / Tailwind| B(Frontend Interface)
     B -->|Auth / Real-time| C[Supabase]
