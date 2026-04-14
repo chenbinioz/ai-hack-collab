@@ -10,6 +10,7 @@ ALTER TABLE public.teams ENABLE ROW LEVEL SECURITY;
 
 CREATE POLICY "Teams are viewable by authenticated users" 
 ON public.teams FOR SELECT TO authenticated USING (true);
+GRANT SELECT ON public.teams TO authenticated;
 
 -- Adding team assignment back into student profiles
 ALTER TABLE public.student_profiles

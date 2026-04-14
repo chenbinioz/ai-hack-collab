@@ -64,7 +64,7 @@ export function FeedbackModal({ open, teamName, teamId, onClose, onSubmitted }: 
       team_id: teamId,
       skill_match: skillMatch,
       style_match: styleMatch,
-      overall_satisfaction_rating: overallSatisfaction,
+      overall_satisfaction: overallSatisfaction,
     };
 
     const { error } = await supabase.from("feedback").insert(payload);

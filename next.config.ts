@@ -22,6 +22,8 @@ const nextConfig: NextConfig = {
   env: {
     NEXT_PUBLIC_SUPABASE_URL: studentSupabaseUrl,
     NEXT_PUBLIC_SUPABASE_ANON_KEY: studentSupabaseAnonKey,
+    NEXT_PUBLIC_API_URL:
+      process.env.NEXT_PUBLIC_API_URL?.trim() || "http://localhost:8000",
   },
 };
 

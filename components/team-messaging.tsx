@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { createStudentBrowserClient } from "@/lib/supabase/student-browser-client";
 
 interface Message {
@@ -22,77 +22,90 @@ export function TeamMessaging({ teamId, teamName }: TeamMessagingProps) {
   const [newMessage, setNewMessage] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
   const supabase = createStudentBrowserClient();
 
-  // Fetch messages on component mount
-  useEffect(() => {
-    fetchMessages();
-  }, [teamId]);
+  const scrollToBottom = () => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  };
 
-  const fetchMessages = async () => {
+  // Fetch messages using the existing Security Definer RPC — no backend required
+  const fetchMessages = useCallback(async (isInitialLoad = false) => {
     try {
-      // Get current session for authorization
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session?.access_token) {
-        setError("Not authenticated");
+      const { data, error: rpcError } = await supabase.rpc("get_team_messages");
+
+      if (rpcError) {
+        const msg =
+          typeof rpcError === "object" && rpcError !== null && "message" in rpcError
+            ? String((rpcError as { message: string }).message)
+            : "Failed to load messages";
+        setError(msg);
         return;
       }
 
-      const response = await fetch("http://localhost:8000/messages", {
-        headers: {
-          "Authorization": `Bearer ${session.access_token}`,
-          "Content-Type": "application/json",
-        },
-      });
-
-      if (!response.ok) {
-        throw new Error("Failed to fetch messages");
-      }
-
-      const data = await response.json();
-      setMessages(data.messages || []);
+      setMessages((data as Message[]) || []);
       setError(null);
-    } catch (err: any) {
+      
+      // If it's the first time we load, scroll to show latest messages
+      if (isInitialLoad) {
+        // Use a small timeout to ensure DOM has rendered
+        setTimeout(scrollToBottom, 100);
+      }
+    } catch (err: unknown) {
       console.error("Error fetching messages:", err);
-      setError(err.message || "Failed to load messages");
+      setError("Failed to load messages");
     }
-  };
+  }, [supabase]);
+
+  // Poll for new messages every 5 seconds (simple real-time alternative)
+  useEffect(() => {
+    void fetchMessages(true); // Treat first fetch as initial load
+    const interval = setInterval(() => {
+      void fetchMessages(false); // Background polls don't scroll
+    }, 5000);
+    return () => clearInterval(interval);
+  }, [teamId, fetchMessages]);
+
 
   const sendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    if (!newMessage.trim()) return;
+    const trimmed = newMessage.trim();
+    if (!trimmed) return;
 
     setIsLoading(true);
     setError(null);
 
     try {
-      // Get current session for authorization
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session?.access_token) {
-        throw new Error("Not authenticated");
-      }
-
-      const response = await fetch("http://localhost:8000/messages", {
-        method: "POST",
-        headers: {
-          "Authorization": `Bearer ${session.access_token}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ content: newMessage.trim() }),
+      // Insert directly into the messages table.
+      // The RLS policy "Users can send messages to their team" enforces that:
+      //   - sender_id == auth.uid()
+      //   - team_id matches the user's own team
+      const { error: insertError } = await supabase.from("messages").insert({
+        team_id: teamId,
+        content: trimmed,
+        // sender_id is enforced server-side via RLS; we still pass it for clarity
+        sender_id: (await supabase.auth.getUser()).data.user?.id,
       });
 
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || "Failed to send message");
+      if (insertError) {
+        const msg =
+          typeof insertError === "object" &&
+          insertError !== null &&
+          "message" in insertError
+            ? String((insertError as { message: string }).message)
+            : "Failed to send message";
+        throw new Error(msg);
       }
 
-      // Clear the input and refresh messages
       setNewMessage("");
-      await fetchMessages();
-    } catch (err: any) {
+      // Immediately refresh so the sender sees their own message
+      await fetchMessages(false);
+      // Always scroll to bottom after user sends a message
+      setTimeout(scrollToBottom, 100);
+    } catch (err: unknown) {
       console.error("Error sending message:", err);
-      setError(err.message || "Failed to send message");
+      setError(err instanceof Error ? err.message : "Failed to send message");
     } finally {
       setIsLoading(false);
     }
@@ -100,8 +113,8 @@ export function TeamMessaging({ teamId, teamName }: TeamMessagingProps) {
 
   const formatTime = (timestamp: string) => {
     return new Date(timestamp).toLocaleTimeString([], {
-      hour: '2-digit',
-      minute: '2-digit'
+      hour: "2-digit",
+      minute: "2-digit",
     });
   };
 
@@ -144,6 +157,7 @@ export function TeamMessaging({ teamId, teamName }: TeamMessagingProps) {
                 </div>
               </div>
             ))}
+            <div ref={messagesEndRef} />
           </div>
         )}
       </div>
@@ -169,7 +183,8 @@ export function TeamMessaging({ teamId, teamName }: TeamMessagingProps) {
       </form>
 
       <p className="text-xs text-muted mt-2">
-        Messages are visible to all team members. Keep it professional and collaborative!
+        Messages are visible to all team members. Keep it professional and
+        collaborative!
       </p>
     </section>
   );

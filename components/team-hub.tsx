@@ -74,35 +74,45 @@ export function TeamHub() {
 
       setHasSubmittedFeedback(!!(existingFeedback && existingFeedback.length > 0));
 
-      // Fetch team details and teammates from our API
-      const response = await fetch("/api/educator-data");
-      if (!response.ok) {
-        throw new Error("Failed to fetch team data");
-      }
+      // Fetch team details and teammates directly from Supabase
+      // This is more reliable and secure than calling the educator-facing backend
+      const { data: teamData, error: teamError } = await supabase
+        .from("teams")
+        .select("*")
+        .eq("id", currentUserProfile.team_id)
+        .single();
 
-      const data = (await response.json()) as {
-        teams: Team[];
-        students: StudentProfile[];
-      };
-      const teamData = data.teams.find((t) => t.id === currentUserProfile.team_id);
-      const allStudents = data.students || [];
-
-      if (!teamData) {
+      if (teamError || !teamData) {
         throw new Error("Team not found");
       }
 
-      // Filter teammates to only those in the same team, excluding current user
-      const teamTeammates = allStudents.filter((student) =>
-        student.team_id === currentUserProfile.team_id && student.id !== user.id
+      // Fetch teammates via RPC to avoid recursive RLS issues
+      const { data: teammatesData, error: teammatesError } = await supabase
+        .rpc("get_my_teammates");
+
+      if (teammatesError) {
+        throw teammatesError;
+      }
+
+      // Filter to only those in the same team, excluding current user
+      const teamTeammates = (teammatesData || []).filter((student) =>
+        student.id !== user.id
       );
 
-      setTeam(teamData);
-      setTeammates(teamTeammates);
+      setTeam(teamData as Team);
+      setTeammates(teamTeammates as Teammate[]);
 
     } catch (err: unknown) {
-      const errorMessage = err instanceof Error ? err.message : String(err);
+      let errorMessage = 'Failed to load team information';
+      if (err instanceof Error) {
+        errorMessage = err.message;
+      } else if (typeof err === 'object' && err !== null && 'message' in err) {
+        // Handle Supabase error objects which may not be Error instances
+        errorMessage = String((err as { message: string }).message);
+      }
+
       console.error('Error fetching team data:', err);
-      setError(errorMessage || 'Failed to load team information');
+      setError(errorMessage);
     } finally {
       setIsLoading(false);
     }

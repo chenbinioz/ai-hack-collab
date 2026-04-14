@@ -52,6 +52,7 @@ create policy "teacher_profiles_insert_supabase_auth_admin"
 
 grant usage on schema public to supabase_auth_admin;
 grant insert, update on public.teacher_profiles to supabase_auth_admin;
+grant select, insert, update on public.teacher_profiles to authenticated;
 
 -- Sign-in check via RPC (avoids RLS recursion on direct SELECT)
 create or replace function public.teacher_profile_exists(p_user_id uuid)

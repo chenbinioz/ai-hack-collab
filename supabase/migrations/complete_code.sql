@@ -10,12 +10,6 @@ CREATE TABLE IF NOT EXISTS public.student_profiles (
   email text,
   role user_role DEFAULT 'student',
   
-
-  -- Matches
-  match_id uuid REFERENCES public.student_profiles(id),
-  match_reason text,
-  is_matched boolean DEFAULT false,
-  
   updated_at timestamptz DEFAULT now(),
   created_at timestamptz DEFAULT now()
 );
@@ -25,7 +19,11 @@ ALTER TABLE public.student_profiles
   DROP COLUMN IF EXISTS collaboration_preference,
   DROP COLUMN IF EXISTS conflict_resolution_style,
   DROP COLUMN IF EXISTS skills,
-  DROP COLUMN IF EXISTS subject_confidence;
+  DROP COLUMN IF EXISTS subject_confidence,
+  DROP COLUMN IF EXISTS match_reason,
+  DROP COLUMN IF EXISTS is_matched;
+
+
 -- 2. Security & Permissions for Auth System
 ALTER TABLE public.student_profiles ENABLE ROW LEVEL SECURITY;
 
@@ -66,19 +64,26 @@ CREATE TRIGGER on_auth_user_created_student_profile
 
 -- 4. General RLS Policies (For Next.js Frontend)
 DROP POLICY IF EXISTS "Users can view their own profile and their match" ON public.student_profiles;
-CREATE POLICY "Users can view their own profile and their match"
-  ON public.student_profiles FOR SELECT
-  USING (auth.uid() = id OR id = (SELECT match_id FROM public.student_profiles WHERE id = auth.uid()));
-
+DROP POLICY IF EXISTS "Users can view their own profile and their team" ON public.student_profiles;
 DROP POLICY IF EXISTS "Users can update their own survey data" ON public.student_profiles;
+
+CREATE POLICY "Users can view their own profile"
+  ON public.student_profiles FOR SELECT
+  TO authenticated
+  USING (auth.uid() = id);
+
 CREATE POLICY "Users can update their own survey data"
   ON public.student_profiles FOR UPDATE
+  TO authenticated
   USING (auth.uid() = id);
   
-drop policy if exists "student_profiles_select_own" on public.student_profiles;
-drop policy if exists "student_profiles_insert_own" on public.student_profiles;
-drop policy if exists "student_profiles_update_own" on public.student_profiles;
-drop policy if exists "student_profiles_insert_supabase_auth_admin" on public.student_profiles;
+GRANT USAGE ON SCHEMA public TO authenticated;
+GRANT SELECT, INSERT, UPDATE ON public.student_profiles TO authenticated;
+
+DROP POLICY IF EXISTS "student_profiles_select_own" ON public.student_profiles;
+DROP POLICY IF EXISTS "student_profiles_insert_own" ON public.student_profiles;
+DROP POLICY IF EXISTS "student_profiles_update_own" ON public.student_profiles;
+DROP POLICY IF EXISTS "student_profiles_insert_supabase_auth_admin" ON public.student_profiles;
 
 create policy "student_profiles_select_own"
   on public.student_profiles
@@ -494,6 +499,7 @@ create policy "teacher_profiles_insert_supabase_auth_admin"
 
 grant usage on schema public to supabase_auth_admin;
 grant insert, update on public.teacher_profiles to supabase_auth_admin;
+grant select, insert, update on public.teacher_profiles to authenticated;
 
 -- Sign-in check via RPC (avoids RLS recursion on direct SELECT)
 create or replace function public.teacher_profile_exists(p_user_id uuid)
@@ -664,6 +670,7 @@ CREATE TABLE IF NOT EXISTS public.teams (
 
 ALTER TABLE public.teams ENABLE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS "Teams are viewable by authenticated users" ON public.teams;
 CREATE POLICY "Teams are viewable by authenticated users" 
 ON public.teams FOR SELECT TO authenticated USING (true);
 
@@ -678,4 +685,306 @@ ADD COLUMN IF NOT EXISTS team_id uuid REFERENCES public.teams(id) ON DELETE SET 
 
 GRANT SELECT, INSERT, UPDATE, DELETE ON public.student_profiles TO service_role;
 GRANT SELECT, INSERT, UPDATE, DELETE ON public.teams TO service_role;
+GRANT SELECT ON public.teams TO authenticated;
 GRANT SELECT, INSERT, UPDATE, DELETE ON public.teacher_profiles TO service_role;
+
+
+-- Create RPC function for students to get their own profile
+CREATE OR REPLACE FUNCTION public.get_student_own_profile()
+RETURNS TABLE (
+  student_id uuid,
+  survey_name text,
+  team_id uuid
+)
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = ''
+AS $$
+BEGIN
+  IF auth.uid() IS NULL THEN
+    RAISE EXCEPTION 'Not authenticated';
+  END IF;
+
+  RETURN QUERY
+  SELECT
+    sp.id,
+    sp.survey_name,
+    sp.team_id
+  FROM public.student_profiles sp
+  WHERE sp.id = auth.uid()
+  AND sp.profile_survey_completed_at IS NOT NULL;
+END;
+$$;
+
+-- Grant execute permission to authenticated users
+GRANT EXECUTE ON FUNCTION public.get_student_own_profile() TO authenticated;
+
+-- Create messages table for team messaging system
+CREATE TABLE IF NOT EXISTS public.messages (
+id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+team_id uuid NOT NULL REFERENCES public.teams(id) ON DELETE CASCADE,
+sender_id uuid NOT NULL REFERENCES public.student_profiles(id) ON DELETE CASCADE,
+content text NOT NULL,
+created_at timestamptz DEFAULT now(),
+updated_at timestamptz DEFAULT now()
+);
+
+-- Enable RLS
+ALTER TABLE public.messages ENABLE ROW LEVEL SECURITY;
+
+GRANT USAGE ON SCHEMA public TO supabase_auth_admin;
+GRANT USAGE ON SCHEMA public TO service_role;
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.messages TO supabase_auth_admin;
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.messages TO service_role;
+GRANT SELECT, INSERT ON public.messages TO authenticated;
+
+-- Policy: Users can view messages from their team's channels
+DROP POLICY "Users can view messages from their team" ON public.messages;
+CREATE POLICY "Users can view messages from their team"
+ON public.messages FOR SELECT
+TO authenticated
+USING (
+team_id IN (
+SELECT team_id
+FROM public.student_profiles
+WHERE id = auth.uid() AND team_id IS NOT NULL
+)
+);
+
+-- Policy: Users can insert messages to their team's channels
+DROP POLICY "Users can send messages to their team" ON public.messages;
+CREATE POLICY "Users can send messages to their team"
+ON public.messages FOR INSERT
+TO authenticated
+WITH CHECK (
+sender_id = auth.uid() AND
+team_id IN (
+SELECT team_id
+FROM public.student_profiles
+WHERE id = auth.uid() AND team_id IS NOT NULL
+)
+);
+
+-- Index for performance
+CREATE INDEX IF NOT EXISTS idx_messages_team_created_at
+ON public.messages(team_id, created_at DESC);
+
+-- Function to get messages for a user's team
+CREATE OR REPLACE FUNCTION public.get_team_messages()
+RETURNS TABLE (
+id uuid,
+team_id uuid,
+sender_id uuid,
+sender_name text,
+content text,
+created_at timestamptz
+)
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = ''
+STABLE
+AS $$
+BEGIN
+RETURN QUERY
+SELECT
+m.id,
+m.team_id,
+m.sender_id,
+sp.survey_name as sender_name,
+m.content,
+m.created_at
+FROM public.messages m
+JOIN public.student_profiles sp ON m.sender_id = sp.id
+WHERE m.team_id = (
+SELECT team_id
+FROM public.student_profiles
+WHERE id = auth.uid() AND team_id IS NOT NULL
+)
+ORDER BY m.created_at ASC;
+END;
+$$;
+
+-- Grant permissions
+GRANT EXECUTE ON FUNCTION public.get_team_messages() TO authenticated;
+
+
+-- Create a SECURITY DEFINER RPC to read the current student's profile survey data
+-- without triggering recursive row-level security checks on student_profiles.
+
+CREATE OR REPLACE FUNCTION public.get_student_profile_survey()
+RETURNS TABLE (
+survey_name text,
+survey_confidence_coding int,
+survey_confidence_written_reports int,
+survey_confidence_presentation_public_speaking int,
+survey_confidence_mathematical_literacy int,
+survey_confidence_abstract_complex_content int,
+survey_confidence_conflict_resolution int
+)
+LANGUAGE sql
+SECURITY DEFINER
+SET search_path = 'public'
+STABLE
+AS $$
+SELECT
+sp.survey_name::text,
+sp.survey_confidence_coding::int,
+sp.survey_confidence_written_reports::int,
+sp.survey_confidence_presentation_public_speaking::int,
+sp.survey_confidence_mathematical_literacy::int,
+sp.survey_confidence_abstract_complex_content::int,
+sp.survey_confidence_conflict_resolution::int
+FROM public.student_profiles sp
+WHERE sp.id = auth.uid();
+$$;
+
+GRANT EXECUTE ON FUNCTION public.get_student_profile_survey() TO authenticated;
+GRANT EXECUTE ON FUNCTION public.get_student_profile_survey() TO service_role;
+
+-- Create a feedback table for student instant sentiment after team assignment.
+CREATE TABLE IF NOT EXISTS public.feedback (
+id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+student_id uuid NOT NULL REFERENCES public.student_profiles(id) ON DELETE CASCADE,
+team_id uuid NOT NULL REFERENCES public.teams(id) ON DELETE CASCADE,
+skill_match smallint NOT NULL CHECK (skill_match BETWEEN 1 AND 5),
+style_match smallint NOT NULL CHECK (style_match BETWEEN 1 AND 5),
+overall_satisfaction smallint NOT NULL CHECK (overall_satisfaction BETWEEN 1 AND 5),
+created_at timestamptz DEFAULT now()
+);
+
+ALTER TABLE public.feedback ENABLE ROW LEVEL SECURITY;
+
+GRANT USAGE ON SCHEMA public TO supabase_auth_admin;
+GRANT USAGE ON SCHEMA public TO service_role;
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.feedback TO supabase_auth_admin;
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.feedback TO service_role;
+GRANT INSERT ON public.feedback TO authenticated;
+GRANT SELECT ON public.feedback TO authenticated;
+
+DROP POLICY IF EXISTS "Students can submit their own feedback" on public.feedback;
+CREATE POLICY "Students can submit their own feedback"
+ON public.feedback FOR INSERT
+TO authenticated
+WITH CHECK (
+student_id = auth.uid()
+AND team_id = (
+SELECT team_id
+FROM public.student_profiles
+WHERE id = auth.uid()
+)
+);
+DROP POLICY IF EXISTS "Students can read their own feedback" ON public.feedback;
+CREATE POLICY "Students can read their own feedback"
+ON public.feedback FOR SELECT
+TO authenticated
+USING (
+student_id = auth.uid()
+);
+
+DROP POLICY IF EXISTS "Educators can read all feedback" ON public.feedback;
+CREATE POLICY "Educators can read all feedback"
+ON public.feedback FOR SELECT
+TO authenticated
+USING (
+EXISTS (
+SELECT 1
+FROM public.teacher_profiles tp
+WHERE tp.id = auth.uid()
+)
+);
+
+
+-- Fix teams table RLS policies to allow service_role full access
+-- (needed for Python backend to create and update teams)
+
+-- Drop the overly restrictive policy
+DROP POLICY IF EXISTS "Teams are viewable by authenticated users" ON public.teams;
+
+-- Allow service_role (backend) to do everything
+DROP POLICY "Service role can manage teams" ON public.teams;
+CREATE POLICY "Service role can manage teams"
+ON public.teams
+FOR ALL
+TO service_role
+USING (true)
+WITH CHECK (true);
+
+-- Allow authenticated users (students) to view teams
+DROP POLICY "Authenticated users can view teams" ON public.teams;
+CREATE POLICY "Authenticated users can view teams"
+ON public.teams
+FOR SELECT
+TO authenticated
+USING (true);
+
+-- Fix student_profiles RLS to avoid recursion when backend fetches data
+-- Drop legacy and problematic policies if they exist
+DROP POLICY IF EXISTS "Users can view their own profile and their team" ON public.student_profiles;
+DROP POLICY IF EXISTS "Users can view their own profile and their match" ON public.student_profiles;
+DROP POLICY IF EXISTS "Users can view their own profile" ON public.student_profiles;
+DROP POLICY IF EXISTS "student_profiles_select_own" ON public.student_profiles;
+
+-- Recreate with simpler logic for authenticated users
+CREATE POLICY "student_profiles_select_own"
+ON public.student_profiles
+FOR SELECT
+TO authenticated
+USING (auth.uid() = id);
+
+-- Allow service_role to read all student profiles (for backend matching)
+DROP POLICY IF EXISTS "Service role can read all student profiles" ON public.student_profiles;
+CREATE POLICY "Service role can read all student profiles"
+ON public.student_profiles
+FOR SELECT
+TO service_role
+USING (true);
+
+-- Allow service_role to update team assignments
+DROP POLICY "Service role can update team assignments" ON public.student_profiles;
+CREATE POLICY "Service role can update team assignments"
+ON public.student_profiles
+FOR UPDATE
+TO service_role
+USING (true)
+WITH CHECK (true);
+
+
+-- If missing, add the service role policy
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_policies 
+        WHERE tablename = 'student_profiles' 
+        AND policyname = 'Service role can read all student profiles'
+    ) THEN
+        CREATE POLICY "Service role can read all student profiles"
+          ON public.student_profiles
+          FOR SELECT
+          TO service_role
+          USING (true);
+        RAISE NOTICE 'Added service role policy for student_profiles';
+    END IF;
+    
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_policies 
+        WHERE tablename = 'student_profiles' 
+        AND policyname = 'Service role can update team assignments'
+    ) THEN
+        CREATE POLICY "Service role can update team assignments"
+          ON public.student_profiles
+          FOR UPDATE
+          TO service_role
+          USING (true)
+          WITH CHECK (true);
+        RAISE NOTICE 'Added service role update policy for student_profiles';
+    END IF;
+END $$;
+
+-- Create a comprehensive service role policy
+DROP POLICY IF EXISTS "service_role_full_access" ON public.student_profiles;
+CREATE POLICY "service_role_full_access"
+  ON public.student_profiles
+  FOR ALL
+  TO service_role
+  USING (true)
+  WITH CHECK (true);

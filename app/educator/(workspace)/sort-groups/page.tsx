@@ -26,6 +26,7 @@ export default function EducatorSortGroupsPage() {
   const [isLoadingTeams, setIsLoadingTeams] = useState(true);
 
   const supabase = createStudentBrowserClient();
+  const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
   const showToast = (message: string, type: "success" | "error" = "success") => {
     setToastMessage(message);
@@ -37,17 +38,26 @@ export default function EducatorSortGroupsPage() {
     try {
       setIsLoadingTeams(true);
 
-      // Fetch data from our API endpoint
-      const response = await fetch("http://localhost:8000/educator-data");
+      // Fetch teams directly from Supabase
+      const { data: teamsData, error: teamsError } = await supabase
+        .from('teams')
+        .select('*');
       
-      if (!response.ok) {
-        throw new Error("Failed to fetch teams and students");
+      if (teamsError) {
+        throw teamsError;
       }
 
-      const data = await response.json();
+      // Fetch students directly from Supabase
+      const { data: studentsData, error: studentsError } = await supabase
+        .from('student_profiles')
+        .select('id, survey_name, team_id');
       
-      setTeams(data.teams || []);
-      setStudents(data.students || []);
+      if (studentsError) {
+        throw studentsError;
+      }
+      
+      setTeams(teamsData || []);
+      setStudents(studentsData || []);
     } catch (error: any) {
       console.error('Error fetching teams and students:', error);
       showToast('Error loading teams and students', 'error');
@@ -69,7 +79,7 @@ export default function EducatorSortGroupsPage() {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 60000); // 60 second timeout
 
-      const response = await fetch("http://localhost:8000/match", {
+      const response = await fetch(`${API_BASE_URL}/match`, {
         method: "POST",
         signal: controller.signal,
       });
@@ -106,7 +116,7 @@ export default function EducatorSortGroupsPage() {
     setToastMessage(null);
 
     try {
-      const response = await fetch("http://localhost:8000/reset-matches", {
+      const response = await fetch(`${API_BASE_URL}/reset-matches`, {
         method: "POST",
       });
 

@@ -19,6 +19,8 @@ CREATE POLICY "Authenticated users can view teams"
   TO authenticated
   USING (true);
 
+GRANT SELECT ON public.teams TO authenticated;
+
 -- Fix student_profiles RLS to avoid recursion when backend fetches data
 -- Drop the problematic select policy if it exists
 DROP POLICY IF EXISTS "student_profiles_select_own" ON public.student_profiles;
