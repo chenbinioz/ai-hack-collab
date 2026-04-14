@@ -38,7 +38,7 @@ In university settings, which range from high-stakes labs to complex mathematics
 | :--- | :--- | :--- |
 | **Frontend** | Next.js (JavaScript/React) | Responsive onboarding survey & student/teacher dashboards. |
 | **Backend** | FastAPI (Python) | High-speed API managing AI prompts and database queries. |
-| **AI Brain** | Gemini API (1.5-Flash) | LLM-based grouping logic and team synthesis. |
+| **AI Brain** | Gemini API (2.5-Flash) | LLM-based grouping logic and team synthesis. |
 | **Database** | Supabase (PostgreSQL) | Relational storage for profiles, teams, and feedback. |
 | **Security** | Row Level Security (RLS) | Ensures data privacy between students and teachers. |
 | **Version Control** | GitHub | Collaborative development and CI/CD. |
