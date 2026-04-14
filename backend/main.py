@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from database import init_db, save_student, get_all_students
+from database import init_db, save_student, get_all_students, save_teams, reset_matches
 from matcher import match_students
 
 app = FastAPI()
@@ -13,11 +13,17 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
     allow_methods=["*"],
-    allow_headers=["*"]
+    allow_headers=["*"],
 )
+
 
 # Set up the database when the app starts
 init_db()
+
+# Root endpoint
+@app.get("/")
+def root():
+    return {"message": "API is running"}
 
 # Defines exactly what data the frontend must send
 # when submitting a student profile. FastAPI automatically
@@ -43,10 +49,27 @@ def list_students():
     return get_all_students()
 
 # ENDPOINT 3: Run the AI matching
-# Call: GET /match  — loads all profiles, sends to Gemini, returns groups
-@app.get("/match")
+# Call: POST /match  — loads all profiles, sends to Gemini, returns groups
+@app.post("/match")
 def match():
     students = get_all_students()
     if len(students) < 2:
         return {"error": "Need at least 2 students to match"}
-    return {"matches": match_students(students)}
+        
+    matches = match_students(students)
+    
+    # Check if the Gemini API request failed (e.g., rate limits)
+    if isinstance(matches, dict) and "error" in matches:
+        return matches
+    
+    # Save the generated teams to Supabase and assign students
+    save_teams(matches)
+    
+    return {"matches": matches}
+
+# ENDPOINT 4: Reset all team assignments
+# Call: POST /reset-matches  — clears team_id on all student profiles and deletes all teams
+@app.post("/reset-matches")
+def reset():
+    reset_matches()
+    return {"message": "All team assignments have been reset."}
