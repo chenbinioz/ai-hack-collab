@@ -91,6 +91,17 @@ def get_educator_data():
         "students": transformed_students
     }
 
+# ENDPOINT 6: Reset all team assignments
+# Call: POST /reset-matches
+@app.post("/reset-matches")
+def reset_matches_endpoint():
+    try:
+        reset_matches()
+        return {"message": "All team assignments have been reset successfully"}
+    except Exception as e:
+        print(f"Error resetting matches: {e}")
+        return {"error": f"Failed to reset matches: {str(e)}"}
+
 def get_all_teams():
     """
     Fetches all teams from the Supabase `teams` table.
