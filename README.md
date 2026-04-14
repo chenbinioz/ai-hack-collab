@@ -2,7 +2,7 @@
 
 An intelligent peer-matching and collaboration platform for Imperial STEM. Features: AI matching (scikit-learn), real-time team coaching (Gemini 1.5 Pro), and accountability tracking. Built with Next.js, FastAPI, and Supabase for the Grand Challenge 2 2026.
 
-Language Python, API framework FastAPI, Database SQLite, AI matching Claude API, Hosting next.js, Version control GitHub Required by brief
+Backend Language Python,Frontend language Java Script, API framework FastAPI, Database Supabase, AI matching Gemini API, Hosting next.js, Version control GitHub Required by brief
 
 This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
 
