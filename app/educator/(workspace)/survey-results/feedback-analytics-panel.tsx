@@ -25,7 +25,7 @@ export function FeedbackAnalyticsPanel() {
 
       try {
         const [{ data: feedbackData, error: feedbackError }, { data: teamData, error: teamError }] = await Promise.all([
-          supabase.from("feedback").select("team_id, overall_satisfaction"),
+          supabase.from("feedback").select("team_id, overall_satisfaction_rating"),
           supabase.from("teams").select("id, name"),
         ]);
 
@@ -42,7 +42,7 @@ export function FeedbackAnalyticsPanel() {
         feedbackData?.forEach((entry: any) => {
           if (!entry.team_id) return;
           const group = grouped.get(entry.team_id) ?? { total: 0, count: 0 };
-          group.total += entry.overall_satisfaction ?? 0;
+          group.total += entry.overall_satisfaction_rating ?? 0;
           group.count += 1;
           grouped.set(entry.team_id, group);
         });

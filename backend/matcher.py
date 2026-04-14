@@ -30,7 +30,7 @@ def get_recent_feedback_patterns():
             team_id,
             skill_match,
             style_match,
-            overall_satisfaction,
+            overall_satisfaction_rating,
             teams(name)
         """).gte("created_at", thirty_days_ago).execute()
 
@@ -53,7 +53,7 @@ def get_recent_feedback_patterns():
 
             team_feedback[team_id]["skill_match"].append(feedback["skill_match"])
             team_feedback[team_id]["style_match"].append(feedback["style_match"])
-            team_feedback[team_id]["overall"].append(feedback["overall_satisfaction"])
+            team_feedback[team_id]["overall"].append(feedback["overall_satisfaction_rating"])
 
         # Build feedback summary
         patterns = []

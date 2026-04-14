@@ -1,8 +1,9 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { createStudentBrowserClient } from "@/lib/supabase/student-browser-client";
 import { TeamMessaging } from "./team-messaging";
+import { FeedbackModal } from "./feedback-modal";
 
 interface Team {
   id: string;
@@ -15,6 +16,12 @@ interface Teammate {
   survey_name: string | null;
 }
 
+type StudentProfile = {
+  id: string;
+  survey_name: string | null;
+  team_id: string | null;
+};
+
 export function TeamHub() {
   const [team, setTeam] = useState<Team | null>(null);
   const [teammates, setTeammates] = useState<Teammate[]>([]);
@@ -25,11 +32,7 @@ export function TeamHub() {
 
   const supabase = createStudentBrowserClient();
 
-  useEffect(() => {
-    fetchTeamData();
-  }, []);
-
-  const fetchTeamData = async () => {
+  const fetchTeamData = useCallback(async () => {
     try {
       setIsLoading(true);
       setError(null);
@@ -72,13 +75,16 @@ export function TeamHub() {
       setHasSubmittedFeedback(!!(existingFeedback && existingFeedback.length > 0));
 
       // Fetch team details and teammates from our API
-      const response = await fetch("http://localhost:8000/educator-data");
+      const response = await fetch("/api/educator-data");
       if (!response.ok) {
         throw new Error("Failed to fetch team data");
       }
 
-      const data = await response.json();
-      const teamData = data.teams.find((t: Team) => t.id === currentUserProfile.team_id);
+      const data = (await response.json()) as {
+        teams: Team[];
+        students: StudentProfile[];
+      };
+      const teamData = data.teams.find((t) => t.id === currentUserProfile.team_id);
       const allStudents = data.students || [];
 
       if (!teamData) {
@@ -86,25 +92,25 @@ export function TeamHub() {
       }
 
       // Filter teammates to only those in the same team, excluding current user
-      const teamTeammates = allStudents.filter((student: any) =>
+      const teamTeammates = allStudents.filter((student) =>
         student.team_id === currentUserProfile.team_id && student.id !== user.id
       );
 
       setTeam(teamData);
       setTeammates(teamTeammates);
 
-      // Show feedback modal if team is newly assigned and no feedback submitted yet
-      if (!hasSubmittedFeedback && !existingFeedback?.length) {
-        setShowFeedbackModal(true);
-      }
-
-    } catch (err: any) {
+    } catch (err: unknown) {
+      const errorMessage = err instanceof Error ? err.message : String(err);
       console.error('Error fetching team data:', err);
-      setError(err.message || 'Failed to load team information');
+      setError(errorMessage || 'Failed to load team information');
     } finally {
       setIsLoading(false);
     }
-  };
+  }, [supabase]);
+
+  useEffect(() => {
+    void fetchTeamData();
+  }, [fetchTeamData]);
 
   if (isLoading) {
     return (
@@ -176,61 +182,99 @@ export function TeamHub() {
           </p>
         </div>
       ) : (
-        <div className="mt-4 space-y-6">
-          {/* Team Info */}
-          <div className="rounded-lg border border-black/5 bg-white p-4 dark:border-white/10 dark:bg-zinc-900">
-            <h3 className="text-lg font-semibold text-foreground">{team.name}</h3>
-            <p className="mt-2 text-sm text-muted">{team.reason}</p>
-          </div>
+        <>
+          <div className="mt-4 space-y-6">
+            {/* Team Info */}
+            <div className="rounded-lg border border-black/5 bg-white p-4 dark:border-white/10 dark:bg-zinc-900">
+              <h3 className="text-lg font-semibold text-foreground">{team.name}</h3>
+              <p className="mt-2 text-sm text-muted">{team.reason}</p>
+            </div>
 
-          {/* Teammates */}
-          <div>
-            <h4 className="text-sm font-medium text-foreground mb-3">
-              Your Teammates ({teammates.length})
-            </h4>
-            {teammates.length === 0 ? (
-              <p className="text-sm text-muted">No other teammates assigned yet.</p>
-            ) : (
-              <div className="grid gap-3 sm:grid-cols-2">
-                {teammates.map((teammate) => (
-                  <div
-                    key={teammate.id}
-                    className="rounded-lg border border-black/5 bg-white p-4 dark:border-white/10 dark:bg-zinc-900"
-                  >
-                    <div className="flex items-center gap-3">
-                      <div className="flex h-10 w-10 items-center justify-center rounded-full bg-brand/10">
-                        <svg
-                          className="h-5 w-5 text-brand"
-                          fill="none"
-                          viewBox="0 0 24 24"
-                          strokeWidth="1.5"
-                          stroke="currentColor"
-                        >
-                          <path
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                            d="M15.75 6a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0zM4.501 20.118a7.5 7.5 0 0114.998 0A17.933 17.933 0 0112 21.75c-2.676 0-5.216-.584-7.499-1.632z"
-                          />
-                        </svg>
-                      </div>
-                      <div>
-                        <h5 className="font-medium text-foreground">
-                          {teammate.survey_name || "Unnamed Student"}
-                        </h5>
-                        <p className="text-xs text-muted">Team member</p>
+            {/* Teammates */}
+            <div>
+              <h4 className="text-sm font-medium text-foreground mb-3">
+                Your Teammates ({teammates.length})
+              </h4>
+              {teammates.length === 0 ? (
+                <p className="text-sm text-muted">No other teammates assigned yet.</p>
+              ) : (
+                <div className="grid gap-3 sm:grid-cols-2">
+                  {teammates.map((teammate) => (
+                    <div
+                      key={teammate.id}
+                      className="rounded-lg border border-black/5 bg-white p-4 dark:border-white/10 dark:bg-zinc-900"
+                    >
+                      <div className="flex items-center gap-3">
+                        <div className="flex h-10 w-10 items-center justify-center rounded-full bg-brand/10">
+                          <svg
+                            className="h-5 w-5 text-brand"
+                            fill="none"
+                            viewBox="0 0 24 24"
+                            strokeWidth="1.5"
+                            stroke="currentColor"
+                          >
+                            <path
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              d="M15.75 6a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0zM4.501 20.118a7.5 7.5 0 0114.998 0A17.933 17.933 0 0112 21.75c-2.676 0-5.216-.584-7.499-1.632z"
+                            />
+                          </svg>
+                        </div>
+                        <div>
+                          <h5 className="font-medium text-foreground">
+                            {teammate.survey_name || "Unnamed Student"}
+                          </h5>
+                          <p className="text-xs text-muted">Team member</p>
+                        </div>
                       </div>
                     </div>
-                  </div>
-                ))}
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Feedback segment */}
+          <div className="rounded-lg border border-black/5 bg-white p-4 dark:border-white/10 dark:bg-zinc-900">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <h4 className="text-sm font-semibold text-foreground">Team feedback</h4>
+                <p className="text-sm text-muted">
+                  Submit your feedback any time to help improve future matches.
+                </p>
               </div>
+              <button
+                type="button"
+                onClick={() => setShowFeedbackModal(true)}
+                disabled={hasSubmittedFeedback}
+                className="rounded-xl border border-black/10 bg-background px-4 py-2 text-sm font-medium text-foreground transition hover:bg-black/[0.03] disabled:cursor-not-allowed disabled:opacity-50 dark:border-white/15 dark:hover:bg-white/[0.06]"
+              >
+                {hasSubmittedFeedback ? "Feedback submitted" : "Leave feedback"}
+              </button>
+            </div>
+            {hasSubmittedFeedback ? (
+              <p className="mt-3 text-sm text-success">Thanks! You’ve already submitted feedback for this team.</p>
+            ) : (
+              <p className="mt-3 text-sm text-muted">
+                You can fill this out now or come back later when you have a clearer view.
+              </p>
             )}
           </div>
-        </div>
+        </>
       )}
 
       {/* Team Messaging - only show when team is assigned */}
       {team && (
-        <TeamMessaging teamId={team.id} teamName={team.name} />
+        <>
+          <FeedbackModal
+            open={showFeedbackModal}
+            teamName={team.name}
+            teamId={team.id}
+            onClose={() => setShowFeedbackModal(false)}
+            onSubmitted={() => setHasSubmittedFeedback(true)}
+          />
+          <TeamMessaging teamId={team.id} teamName={team.name} />
+        </>
       )}
     </section>
   );

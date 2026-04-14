@@ -5,7 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from supabase import create_client
 
-from database import init_db, save_student, get_all_students, save_teams, reset_matches, supabase
+from database import init_db, save_student, get_all_students, get_all_teams, save_teams, reset_matches, supabase
 from matcher import match_students
 
 app = FastAPI()

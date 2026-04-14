@@ -89,6 +89,21 @@ def save_teams(matches_parsed):
     
     print("AI Team sync complete.")
 
+def get_all_teams():
+    """
+    Fetches all teams from the Supabase 'teams' table.
+    """
+    if not supabase:
+        print("Error: Supabase client is not initialized.")
+        return []
+    
+    try:
+        response = supabase.table("teams").select("*").execute()
+        return response.data or []
+    except Exception as e:
+        print(f"Supabase Select Error: {e}")
+        return []
+
 def reset_matches():
     """
     Clears all team assignments:

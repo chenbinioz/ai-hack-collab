@@ -100,7 +100,7 @@ export default function Home() {
               Course-first grouping
             </p>
             <h1 className="max-w-3xl text-4xl font-bold leading-tight tracking-tight text-foreground sm:text-5xl lg:text-[3.25rem] lg:leading-[1.1]">
-              Coursework groups that fit how you learn — not how you look.
+              Coursework groups that fit how you learn — not arbitrary grouping.
             </h1>
             <p className="mt-6 max-w-2xl text-lg leading-relaxed text-muted sm:text-xl">
               Cohort Connect places students on the same course — Chemistry, Physics, and more — into balanced
