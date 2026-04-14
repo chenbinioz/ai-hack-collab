@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from database import init_db, save_student, get_all_students, save_teams, reset_matches
+from database import init_db, save_student, get_all_students, save_teams, reset_matches, supabase
 from matcher import match_students
 
 app = FastAPI()
@@ -67,9 +67,41 @@ def match():
     
     return {"matches": matches}
 
-# ENDPOINT 4: Reset all team assignments
-# Call: POST /reset-matches  — clears team_id on all student profiles and deletes all teams
-@app.post("/reset-matches")
-def reset():
-    reset_matches()
-    return {"message": "All team assignments have been reset."}
+# ENDPOINT 5: Get teams and students for educators
+# Call: GET /educator-data
+@app.get("/educator-data")
+def get_educator_data():
+    # Get all teams
+    teams = get_all_teams()
+    
+    # Get all students with completed surveys
+    students = get_all_students()
+    
+    # Transform students to include only needed fields
+    transformed_students = []
+    for student in students:
+        transformed_students.append({
+            "id": student.get("id"),
+            "survey_name": student.get("survey_name"),
+            "team_id": student.get("team_id")
+        })
+    
+    return {
+        "teams": teams,
+        "students": transformed_students
+    }
+
+def get_all_teams():
+    """
+    Fetches all teams from the Supabase `teams` table.
+    """
+    if not supabase:
+        print("Error: Supabase client is not initialized.")
+        return []
+    
+    try:
+        response = supabase.table("teams").select("*").order("created_at", desc=True).execute()
+        return response.data
+    except Exception as e:
+        print(f"Supabase Teams Error: {e}")
+        return []
