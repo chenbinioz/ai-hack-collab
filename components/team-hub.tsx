@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { createStudentBrowserClient } from "@/lib/supabase/student-browser-client";
+import { TeamMessaging } from "./team-messaging";
 
 interface Team {
   id: string;
@@ -208,6 +209,11 @@ export function TeamHub() {
             )}
           </div>
         </div>
+      )}
+
+      {/* Team Messaging - only show when team is assigned */}
+      {team && (
+        <TeamMessaging teamId={team.id} teamName={team.name} />
       )}
     </section>
   );
