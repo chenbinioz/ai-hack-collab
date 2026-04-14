@@ -16,7 +16,7 @@ This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-
 **Grand Challenge:** AI Agents for Matching Learners with Learners
 
 ## 🌍 Grand Challenge Addressed
-In university settings—ranging from high-stakes labs to complex mathematics coursework—group formation is often the weakest link. **Random Allocation** leads to "Communication Friction" (clashing work styles), while **Self-Selection** leads to "Skill Silos" (friends with identical strengths pairing up). 
+In university settings, which range from high-stakes labs to complex mathematics coursework, group formation is often the weakest link. **Random Allocation** leads to "Communication Friction" (clashing work styles), while **Self-Selection** leads to "Skill Silos" (friends with identical strengths pairing up). 
 
 **Cohort Connect** solves this by using an algorithmic approach to group formation that ensures students share a common "work vibe" while possessing the diverse skills necessary to complete multifaceted projects.
 
