@@ -55,40 +55,11 @@ graph TD
     D -->|Store Results| C
     C -->|Update UI| B
 ```
-## 📊 The Matching Matrix
-Our algorithm evaluates students based on three distinct categories:
-
-### 1. Previous Subject Experience
-* **A-Level (or equivalent) Background:** List of subject choices to identify baseline knowledge.
-* **Ancillary Modules:** Ancillary module choices to ensure academic diversity within groups.
-
-### 2. Relevant Skills (Complementary Matching)
-Students are paired to ensure the group has high confidence (**4-5**) across all domains:
-* **Coding** (1-5 confidence)
-* **Written Reports** (1-5 confidence)
-* **Presentation/Public Speaking** (1-5 confidence)
-* **Mathematical Literacy** (1-5 confidence)
-* **Understanding Abstract/Complex Content** (1-5 confidence)
-* **Conflict Resolution** (1-5 confidence)
-
-### 3. Approach to Work (Alignment Matching)
-Students are paired based on similar scores to reduce friction:
-* **Deadline Style:** Steady workers (**1**) vs. Under-pressure performers (**5**).
-* **Discussion Style:** Listeners (**1**) vs. Leaders (**5**). *Note: This should be matched for alignment, not extreme bias.*
-* **Disagreement Resolution:** Address issues directly (**1**) vs. Avoidance to prevent confrontation (**5**).
-* **Concept Processing:** Independent work (**1**) vs. Collaborative work (**5**).
-* **Communication Preference:** Frequent/Informal (**1**) vs. Structured/Formal (**5**).
-* **Expectation Management:** Do it myself (**1**) vs. Discuss with teammate (**5**).
-* **Workload Management:** Independent management (**1**) vs. Team redistribution (**5**).
-* **Project Role:** Focused individual tasks (**1**) vs. Group coordination (**5**).
-* **Critical Feedback Instinct:** Defensive/Explaining (**1**) vs. Listening/Revising (**5**).
-
----
 
 ## 🚀 Installation and Setup
 ### Prerequisites
-* **Node.js:** [Insert Version]
-* **Python:** [Insert Version]
+* **Node.js:** Version: v24.14.1
+* **Python:** Version: 3.13.5
 * **Supabase Account**
 
 ### 1. Database Setup
@@ -122,7 +93,7 @@ npm run dev
 **For Teachers**
 1. Monitor Cohort: View the list of students who have completed the survey under the "Teacher Dashboard."
 
-2. AI Matching: Navigate to the "Sort Groups" tab. Click "Generate AI Teams" to trigger the Gemini-1.5-Flash orchestration.
+2. AI Matching: Navigate to the "Sort Groups" tab. Click "Generate AI Teams" to trigger the Gemini-2.5-Flash orchestration.
 
 3. Review & Analytics: View the formed teams and monitor student satisfaction scores through the real-time feedback analytics.
 
