@@ -4,9 +4,9 @@ This project is designed to address Grand Challenge 2
 Problem Statement:
 Current group formation methods priorities convenience over compatibility, leading to inefficient and often unenjoyable experiences. Incompatible matches can lead to isolation, poorer academic performance, and an overall negative perception of group work as a burden rather than an opportunity. 
 
-We all have met this problem before personally, either through skill smbalances between teams, or mismatched work ethics between peer. This has lead in the past to negative experiences, which we believe should never be the case, and cause us to strive to make a difference.
+We all have met this problem before personally, either through skill imbalances between teams, or mismatched work ethics between peer. This has lead in the past to negative experiences, which we believe should never be the case, and cause us to strive to make a difference.
 
-Our solution is an intelligent peer-matching and collaboration platform for Imperial STEM. Features: AI matching (scikit-learn), real-time team coaching (Gemini 1.5 Pro), and accountability tracking. Built with Next.js, FastAPI, and Supabase for the Grand Challenge 2 2026.
+Our solution is an intelligent peer-matching and collaboration platform for Imperial STEM. Features: AI matching (Gemini-Flash-2.5), collaboration features and accountability tracking. Built with Next.js, FastAPI, and Supabase for the Grand Challenge 2 2026.
 
 Backend Language Python,Frontend language Java Script, API framework FastAPI, Database Supabase, AI matching Gemini API, Hosting next.js, Version control GitHub Required by brief
 
@@ -16,38 +16,43 @@ This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-
 **Grand Challenge:** AI Agents for Matching Learners with Learners
 
 ## 🌍 Grand Challenge Addressed
-In university settings, which range from high-stakes labs to complex mathematics coursework, group formation is often the weakest link. **Random Allocation** leads to "Communication Friction" (clashing work styles), while **Self-Selection** leads to "Skill Silos" (friends with identical strengths pairing up). 
+In university settings, which range from high-stakes labs to complex mathematics coursework, group formation is often the weakest link. **Random Allocation** leads to clashes in working styles, while **Self-Selection** leads to students teaming up within their friend groups, often with similar skillsets.
 
-**Cohort Connect** solves this by using an algorithmic approach to group formation that ensures students share a common "work vibe" while possessing the diverse skills necessary to complete multifaceted projects.
+**Cohort Connect** solves this by using an AI-based approach to group formation that ensures students share a common "work vibe" while possessing the diverse skills necessary to complete multifaceted projects.
 
 ## 💡 Problem Statement & Solution Overview
 **The Problem:** Inefficient group work stems from two main issues:
 1. **Approach Incompatibility:** Teammates who communicate or handle deadlines in fundamentally different ways.
 2. **Skill Homogeneity:** Groups that lack specific technical or soft skills (e.g., a team of great coders who cannot write reports).
 
-**The Solution:** An intelligent matchmaking agent that processes student profiles into a multidimensional matrix. It applies **Alignment Logic** (seeking small differences) for work approaches and **Complementary Logic** (seeking large differences) for technical skills.
+**The Solution: Cohort Connect** leverages **Gemini-2.5-Flash** to perform "Reasoning-based Grouping." By processing raw student survey data as a holistic thinking model, our agent applies:
+
+1. **Alignment Logic:** Seeking high similarity in work ethics and communication styles (minimizing friction).
+2. **Complementary Logic:** Seeking high diversity in technical competencies (maximizing project capability).
+3. **Automated Synthesis:** The AI generates team names, project themes, and brief "Why you were matched" justifications for each group.
+
 
 ## 🛠 Technology Stack & Architecture
-### Backend & Data
-* **Supabase (PostgreSQL):** A relational database utilizing a dual-table structure (`student_profiles` and `teacher_profiles`) with automated routing via SQL Triggers.
-* **FastAPI (Python):** The engine that processes the pairwise matrix and calculates match scores.
-* **Row Level Security (RLS):** Industry-standard security ensuring students only access their own data and their assigned match.
 
-### Frontend
-* **Next.js:** A responsive React framework for the onboarding survey and student dashboard.
-* **Tailwind CSS:** For modern, accessible UI design.
+| Component | Technology | Role |
+| :--- | :--- | :--- |
+| **Frontend** | Next.js (JavaScript/React) | Responsive onboarding survey & student/teacher dashboards. |
+| **Backend** | FastAPI (Python) | High-speed API managing AI prompts and database queries. |
+| **AI Brain** | Gemini API (1.5-Flash) | LLM-based grouping logic and team synthesis. |
+| **Database** | Supabase (PostgreSQL) | Relational storage for profiles, teams, and feedback. |
+| **Security** | Row Level Security (RLS) | Ensures data privacy between students and teachers. |
+| **Version Control** | GitHub | Collaborative development and CI/CD. |
 
 ### 🏗 Architecture Diagram
-```mermaid
 graph TD
-    User((User)) -->|Sign Up| Auth[Supabase Auth]
-    Auth -->|Trigger| Router{SQL Router}
-    Router -->|Student| S_Table[(Student Profiles)]
-    Router -->|Teacher| T_Table[(Teacher Profiles)]
-    
-    S_Table -->|Matrix Data| FastAPI[FastAPI Engine]
-    FastAPI -->|AI Match System| S_Table
-    S_Table -->|Display Match| Frontend[Next.js UI]
+    A[Student/Teacher Browser] -->|Next.js / Tailwind| B(Frontend Interface)
+    B -->|Auth / Real-time| C[Supabase]
+    B -->|POST Requests| D[FastAPI Backend]
+    D -->|Fetch Student Profiles| C
+    D -->|Execute Prompt| E[Gemini 2.5 Flash API]
+    E -->|JSON Match Data| D
+    D -->|Store Results| C
+    C -->|Update UI| B
 ```
 ## 📊 The Matching Matrix
 Our algorithm evaluates students based on three distinct categories:
@@ -87,8 +92,9 @@ Students are paired based on similar scores to reduce friction:
 
 ### 1. Database Setup
 1. Create a new Supabase project.
-2. Run the `schema.sql` script located in the `/database` folder.
-3. This will initialize the tables, the `user_role` types, and the `handle_new_auth_user_routing` trigger.
+2. Go to the SQL Editor and run the provided supabase/schema.sql file to create the profiles, teams, and feedback tables
+3. In Authentication > Providers, enable "Email" and toggle "Confirm Email" to OFF for easier testing.
+4. Note your Project URL, Anon Public Key, and Service Role Key for the environment variables.
 
 ### 2. Backend Setup
 ```bash
@@ -105,13 +111,19 @@ npm install
 npm run dev
 ```
 ## 📖 Usage Guide
-1. **Onboarding:** Students sign up and are automatically routed to the student database.
+**For Students**
+1. Sign Up: Create an account using your university email.
 
-2. **The Survey:** Students complete a three-part survey to build their matrix profile.
+2. Complete Survey: Fill out the skill and work-style assessment. This data is synced to the database for the matching agent.
 
-3. **Submission:** Upon completion, the profile is "Locked" to ensure data integrity for the matching algorithm.
+3. View Team: Once the teacher triggers the match, your "Team Hub" will automatically update with your teammates' names and shared goals.
 
-4. **Match Discovery:** Once the teacher initiates a match, students can view their partner, their partner's skills, and a "Match Reason" generated by the agent.
+**For Teachers**
+1. Monitor Cohort: View the list of students who have completed the survey under the "Teacher Dashboard."
+
+2. AI Matching: Navigate to the "Sort Groups" tab. Click "Generate AI Teams" to trigger the Gemini-1.5-Flash orchestration.
+
+3. Review & Analytics: View the formed teams and monitor student satisfaction scores through the real-time feedback analytics.
 
 
 **🎥 Demo Video**
@@ -128,23 +140,5 @@ npm run dev
 
 ## 📜 License Information
 This project is licensed under the MIT License.
-
-## Getting Started
-
-First, run the development server:
-
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
-```
-
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
-
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
 
 This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
