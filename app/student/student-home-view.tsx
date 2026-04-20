@@ -7,8 +7,22 @@ import { useStudentAuth } from "@/app/providers";
 import { useStudentProfileSurveyStatus } from "@/lib/hooks/use-student-profile-survey-status";
 import { TeamHub } from "@/components/team-hub";
 import { StudentSkillsVisualization } from "./student-skills-visualization";
+import { JoinClassSection } from "./join-class-section";
+import { ClassTeamSection } from "./class-team-section";
 
-type TabType = "overview" | "skills";
+interface StudentClass {
+  id: string;
+  name: string;
+  description: string;
+  code: string;
+  coursework_deadline: string | null;
+  enrolled_at: string;
+  role: string;
+  max_team_size: number;
+  ai_preferences: any;
+}
+
+type TabType = "overview" | "skills" | string; // Allow class IDs as tabs
 
 export function StudentHomeView() {
   const router = useRouter();
@@ -16,9 +30,12 @@ export function StudentHomeView() {
   const { user, isStudentAuthLoading, signOutStudent } = useStudentAuth();
   const { isLoading: isSurveyStatusLoading, surveyCompleted } = useStudentProfileSurveyStatus();
   const [isStudentSigningOut, setIsStudentSigningOut] = useState(false);
+  const [classes, setClasses] = useState<StudentClass[]>([]);
+  const [isLoadingClasses, setIsLoadingClasses] = useState(false);
+  const [classesError, setClassesError] = useState<string | null>(null);
 
   // Get active tab from URL params, default to overview
-  const activeTab: TabType = (searchParams.get("tab") as TabType) === "skills" ? "skills" : "overview";
+  const activeTab: TabType = searchParams.get("tab") || "overview";
 
   const meta = user?.user_metadata;
   const displayName =
@@ -26,6 +43,38 @@ export function StudentHomeView() {
     (typeof meta?.name === "string" && meta.name.trim()) ||
     user?.email?.split("@")[0] ||
     "Student";
+
+  // Fetch student's classes
+  useEffect(() => {
+    if (user) {
+      fetchStudentClasses();
+    }
+  }, [user]);
+
+  const fetchStudentClasses = async () => {
+    try {
+      setIsLoadingClasses(true);
+      setClassesError(null);
+      const response = await fetch("/api/student/classes", {
+        method: "GET",
+        headers: { "Content-Type": "application/json" },
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        setClassesError(data.error || "Could not load your classes.");
+        return;
+      }
+
+      setClasses(data.classes || []);
+    } catch (error) {
+      console.error("Error fetching student classes:", error);
+      setClassesError("Unable to load your classes right now.");
+    } finally {
+      setIsLoadingClasses(false);
+    }
+  };
 
   async function handleStudentLogout() {
     setIsStudentSigningOut(true);
@@ -47,6 +96,13 @@ export function StudentHomeView() {
     }
     router.replace(`/student?${params.toString()}`, { scroll: false });
   }
+
+  // Get available tabs (overview, skills, and each class)
+  const availableTabs = [
+    { id: "overview", label: "Overview" },
+    { id: "skills", label: "Skills" },
+    ...classes.map(cls => ({ id: cls.id, label: cls.name }))
+  ];
 
   if (isStudentAuthLoading || !user || isSurveyStatusLoading) {
     return (
@@ -78,33 +134,25 @@ export function StudentHomeView() {
       <main className="mx-auto flex w-full max-w-3xl flex-1 flex-col px-4 py-12 sm:px-6">
         <h1 className="text-3xl font-bold tracking-tight text-foreground">Welcome, {displayName}</h1>
         <p className="mt-3 max-w-xl text-muted">
-          This is your signed-in student home. More tools for cohorts, groups, and coursework will appear here
-          soon.
+          This is your signed-in student home. View your classes, teams, and profile information.
         </p>
 
         {/* Tab Navigation */}
         <div className="mt-8 border-b border-black/10 dark:border-white/10">
-          <nav className="flex space-x-8">
-            <button
-              onClick={() => handleTabChange("overview")}
-              className={`pb-4 px-1 border-b-2 font-medium text-sm transition-colors ${
-                activeTab === "overview"
-                  ? "border-brand text-brand"
-                  : "border-transparent text-muted hover:text-foreground hover:border-black/20"
-              }`}
-            >
-              Overview
-            </button>
-            <button
-              onClick={() => handleTabChange("skills")}
-              className={`pb-4 px-1 border-b-2 font-medium text-sm transition-colors ${
-                activeTab === "skills"
-                  ? "border-brand text-brand"
-                  : "border-transparent text-muted hover:text-foreground hover:border-black/20"
-              }`}
-            >
-              Skills
-            </button>
+          <nav className="flex space-x-8 overflow-x-auto">
+            {availableTabs.map((tab) => (
+              <button
+                key={tab.id}
+                onClick={() => handleTabChange(tab.id)}
+                className={`pb-4 px-1 border-b-2 font-medium text-sm transition-colors whitespace-nowrap ${
+                  activeTab === tab.id
+                    ? "border-brand text-brand"
+                    : "border-transparent text-muted hover:text-foreground hover:border-black/20"
+                }`}
+              >
+                {tab.label}
+              </button>
+            ))}
           </nav>
         </div>
 
@@ -148,7 +196,105 @@ export function StudentHomeView() {
                 )}
               </section>
 
-              <TeamHub />
+              <JoinClassSection onClassJoined={fetchStudentClasses} />
+
+              {/* Your Classes Section */}
+              <section
+                className="rounded-2xl border border-black/10 bg-surface p-6 shadow-sm dark:border-white/10 sm:p-8"
+                aria-labelledby="your-classes-heading"
+              >
+                <h2 id="your-classes-heading" className="text-lg font-semibold text-foreground">
+                  Your Classes
+                </h2>
+                <p className="mt-2 text-sm text-muted">
+                  Classes you've joined and your team assignments.
+                </p>
+
+                {isLoadingClasses ? (
+                  <div className="mt-6 flex items-center justify-center py-8">
+                    <div className="flex items-center gap-2 text-muted">
+                      <svg
+                        className="h-5 w-5 animate-spin"
+                        xmlns="http://www.w3.org/2000/svg"
+                        fill="none"
+                        viewBox="0 0 24 24"
+                      >
+                        <circle
+                          className="opacity-25"
+                          cx="12"
+                          cy="12"
+                          r="10"
+                          stroke="currentColor"
+                          strokeWidth="4"
+                        ></circle>
+                        <path
+                          className="opacity-75"
+                          fill="currentColor"
+                          d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                        ></path>
+                      </svg>
+                      Loading your classes...
+                    </div>
+                  </div>
+                ) : classesError ? (
+                  <div className="mt-6 rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700 dark:border-red-800 dark:bg-red-950/30 dark:text-red-300">
+                    {classesError}
+                  </div>
+                ) : classes.length === 0 ? (
+                  <div className="mt-6 rounded-xl border border-dashed border-black/15 bg-black/[0.02] p-8 text-center dark:border-white/20 dark:bg-white/[0.03]">
+                    <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-brand/10">
+                      <svg
+                        className="h-6 w-6 text-brand"
+                        fill="none"
+                        viewBox="0 0 24 24"
+                        strokeWidth="1.5"
+                        stroke="currentColor"
+                      >
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.746 0 3.332.477 4.5 1.253v13C19.832 18.477 18.246 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"
+                        />
+                      </svg>
+                    </div>
+                    <h3 className="mt-4 text-sm font-medium text-foreground">No classes yet</h3>
+                    <p className="mt-2 text-sm text-muted">
+                      Join your first class using the code provided by your educator.
+                    </p>
+                  </div>
+                ) : (
+                  <div className="mt-6 space-y-4">
+                    {classes.map((cls) => (
+                      <div
+                        key={cls.id}
+                        className="rounded-xl border border-black/10 bg-white p-4 transition hover:bg-black/[0.02] dark:border-white/15 dark:bg-zinc-900 dark:hover:bg-white/[0.02]"
+                      >
+                        <div className="flex items-start justify-between">
+                          <div className="flex-1">
+                            <h3 className="font-medium text-foreground">{cls.name}</h3>
+                            <p className="mt-1 text-sm text-muted">{cls.description}</p>
+                            <div className="mt-2 flex items-center gap-4 text-xs text-muted">
+                              <span>Class Code: <code className="rounded bg-black/5 px-1 py-0.5 dark:bg-white/10">{cls.code}</code></span>
+                              <span>Max Team Size: {cls.max_team_size}</span>
+                              <span>
+                                Deadline: {cls.coursework_deadline ? new Date(cls.coursework_deadline).toLocaleDateString() : "Not set"}
+                              </span>
+                              <span>Joined {new Date(cls.enrolled_at).toLocaleDateString()}</span>
+                            </div>
+                          </div>
+                          <button
+                            onClick={() => handleTabChange(cls.id)}
+                            className="ml-4 rounded-lg bg-brand px-3 py-1.5 text-xs font-medium text-white transition hover:bg-brand-deep"
+                          >
+                            View Details
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </section>
+
             </>
           )}
 
@@ -173,6 +319,14 @@ export function StudentHomeView() {
                 <StudentSkillsVisualization />
               )}
             </div>
+          )}
+
+          {/* Class-specific tabs */}
+          {classes.find(cls => cls.id === activeTab) && (
+            <ClassTeamSection
+              classId={activeTab}
+              classInfo={classes.find((cls) => cls.id === activeTab) || null}
+            />
           )}
         </div>
       </main>

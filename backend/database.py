@@ -38,10 +38,11 @@ def get_all_students():
         print(f"Supabase Select Error: {e}")
         return []
 
-def save_teams(matches_parsed):
+def save_teams(matches_parsed, class_id=None):
     """
     Takes parsed JSON containing groups, inserts a new 'teams' record,
     and assigns 'team_id' on the matching member 'student_profiles'.
+    Now supports class-scoped teams.
     """
     if not supabase:
         print("Error: Supabase client is not initialized.")
@@ -55,6 +56,7 @@ def save_teams(matches_parsed):
     for idx, group in enumerate(groups, start=1):
         reason = group.get("reason", "")
         members = group.get("members", [])
+        group_class_id = group.get("class_id", class_id)  # Use group-specific class_id or fallback to parameter
         
         # Basic validation: ensure we have members and they look like valid UUIDs (36 chars)
         valid_members = [m for m in members if isinstance(m, str) and len(m) == 36]
@@ -67,21 +69,25 @@ def save_teams(matches_parsed):
             "name": f"Team {idx}",
             "reason": reason
         }
-        
+
+        # Add class_id if provided
+        if group_class_id:
+            team_insert["class_id"] = group_class_id
+
         try:
             # 1. Create the team
             team_res = supabase.table("teams").insert(team_insert).execute()
-            
+
             if not team_res.data:
                 print(f"Failed to create Team {idx}")
                 continue
-                
+
             team_id = team_res.data[0]["id"]
-            
+
             # 2. Update all members of this team in ONE request (Batch Update)
             # This is significantly faster than one-by-one updates
             update_res = supabase.table("student_profiles").update({"team_id": team_id}).in_("id", valid_members).execute()
-            
+
             print(f"Successfully created Team {idx} and assigned {len(update_res.data)} students.")
             
         except Exception as e:

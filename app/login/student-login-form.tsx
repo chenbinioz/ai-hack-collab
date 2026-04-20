@@ -47,7 +47,7 @@ export function StudentLoginForm({
 }) {
   const router = useRouter();
   const postLoginFallback =
-    studentLoginFormVariant === "educator" ? "/educator/survey-results" : "/student";
+    studentLoginFormVariant === "educator" ? "/educator/classes" : "/student";
   const afterLogin = getSafeRedirectPath(studentRedirectAfterLogin, postLoginFallback);
   const copy =
     studentLoginFormVariant === "student"

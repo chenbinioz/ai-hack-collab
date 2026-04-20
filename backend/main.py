@@ -1,4 +1,5 @@
 import os
+from typing import Optional
 
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -226,6 +227,388 @@ def send_message(request: Request, message: dict):
     except Exception as e:
         print(f"Error sending message: {e}")
         return {"error": f"Failed to send message: {str(e)}"}
+
+# ============================================================================
+# CLASS MANAGEMENT ENDPOINTS
+# ============================================================================
+
+class ClassCreateRequest(BaseModel):
+    name: str
+    description: str = ""
+    coursework_deadline: Optional[str] = None
+    max_team_size: int = 3
+    ai_preferences: dict = {
+        "focus_skills": True,
+        "focus_working_style": True,
+        "focus_availability": True,
+        "focus_goals": True,
+        "balance_diversity": True
+    }
+
+class JoinClassRequest(BaseModel):
+    code: str
+
+# ENDPOINT 9: Create a new class (Educator only)
+# Call: POST /educator/classes with JSON body
+@app.post("/educator/classes")
+def create_class(request: Request, class_data: ClassCreateRequest):
+    if not supabase:
+        return {"error": "Database not configured"}
+
+    try:
+        auth_header = request.headers.get("Authorization")
+        if not auth_header or not auth_header.startswith("Bearer "):
+            return {"error": "Not authenticated"}
+
+        token = auth_header.replace("Bearer ", "")
+        temp_supabase = create_client(
+            os.getenv("SUPABASE_URL"),
+            os.getenv("SUPABASE_SERVICE_ROLE_KEY") or os.getenv("SUPABASE_ANON_KEY")
+        )
+
+        user_response = temp_supabase.auth.get_user(token)
+        if not user_response.user:
+            return {"error": "Invalid token"}
+
+        educator_id = str(user_response.user.id)
+
+        # Generate unique class code
+        code_result = supabase.rpc("generate_class_code").execute()
+        class_code = code_result.data
+
+        class_insert = {
+            "educator_id": educator_id,
+            "name": class_data.name,
+            "description": class_data.description,
+            "coursework_deadline": class_data.coursework_deadline,
+            "code": class_code,
+            "max_team_size": class_data.max_team_size,
+            "ai_preferences": class_data.ai_preferences
+        }
+
+        result = supabase.table("classes").insert(class_insert).execute()
+
+        if result.data:
+            return {
+                "success": True,
+                "class": result.data[0],
+                "join_code": class_code
+            }
+        else:
+            return {"error": "Failed to create class"}
+
+    except Exception as e:
+        print(f"Error creating class: {e}")
+        return {"error": f"Failed to create class: {str(e)}"}
+
+# ENDPOINT 10: Get educator's classes
+# Call: GET /educator/classes
+@app.get("/educator/classes")
+def get_educator_classes(request: Request):
+    if not supabase:
+        return {"error": "Database not configured"}
+
+    try:
+        auth_header = request.headers.get("Authorization")
+        if not auth_header or not auth_header.startswith("Bearer "):
+            return {"error": "Not authenticated"}
+
+        token = auth_header.replace("Bearer ", "")
+        temp_supabase = create_client(
+            os.getenv("SUPABASE_URL"),
+            os.getenv("SUPABASE_SERVICE_ROLE_KEY") or os.getenv("SUPABASE_ANON_KEY")
+        )
+
+        user_response = temp_supabase.auth.get_user(token)
+        if not user_response.user:
+            return {"error": "Invalid token"}
+
+        educator_id = str(user_response.user.id)
+
+        # Get classes
+        classes_result = supabase.table("classes").select("*").eq("educator_id", educator_id).order("created_at", desc=True).execute()
+
+        classes = classes_result.data or []
+
+        # Get enrollment counts for each class
+        for class_item in classes:
+            enrollment_count = supabase.table("class_enrollments").select("id", count=True).eq("class_id", class_item["id"]).execute()
+            class_item["student_count"] = len(enrollment_count.data) if enrollment_count.data else 0
+
+        return {"classes": classes}
+
+    except Exception as e:
+        print(f"Error fetching classes: {e}")
+        return {"error": f"Failed to fetch classes: {str(e)}"}
+
+# ENDPOINT 11: Get class details with enrolled students
+# Call: GET /educator/classes/{class_id}
+@app.get("/educator/classes/{class_id}")
+def get_class_details(class_id: str, request: Request):
+    if not supabase:
+        return {"error": "Database not configured"}
+
+    try:
+        auth_header = request.headers.get("Authorization")
+        if not auth_header or not auth_header.startswith("Bearer "):
+            return {"error": "Not authenticated"}
+
+        token = auth_header.replace("Bearer ", "")
+        temp_supabase = create_client(
+            os.getenv("SUPABASE_URL"),
+            os.getenv("SUPABASE_SERVICE_ROLE_KEY") or os.getenv("SUPABASE_ANON_KEY")
+        )
+
+        user_response = temp_supabase.auth.get_user(token)
+        if not user_response.user:
+            return {"error": "Invalid token"}
+
+        educator_id = str(user_response.user.id)
+
+        # Verify educator owns this class
+        class_result = supabase.table("classes").select("*").eq("id", class_id).eq("educator_id", educator_id).execute()
+
+        if not class_result.data:
+            return {"error": "Class not found or access denied"}
+
+        class_data = class_result.data[0]
+
+        # Get enrolled students
+        enrollments = supabase.table("class_enrollments").select("""
+            id,
+            enrolled_at,
+            role,
+            student_profiles!inner(id, survey_name, profile_survey_completed_at)
+        """).eq("class_id", class_id).execute()
+
+        students = []
+        if enrollments.data:
+            for enrollment in enrollments.data:
+                student = enrollment["student_profiles"]
+                students.append({
+                    "id": student["id"],
+                    "name": student.get("survey_name") or "Unnamed Student",
+                    "enrolled_at": enrollment["enrolled_at"],
+                    "role": enrollment["role"],
+                    "survey_completed": student.get("profile_survey_completed_at") is not None
+                })
+
+        # Get teams for this class
+        teams_result = supabase.table("teams").select("*").eq("class_id", class_id).execute()
+        teams = teams_result.data or []
+
+        return {
+            "class": class_data,
+            "students": students,
+            "teams": teams
+        }
+
+    except Exception as e:
+        print(f"Error fetching class details: {e}")
+        return {"error": f"Failed to fetch class details: {str(e)}"}
+
+# ENDPOINT 12: Student joins a class by code
+# Call: POST /student/join-class with JSON body {"code": "ABC123"}
+@app.post("/student/join-class")
+def join_class(request: Request, join_data: JoinClassRequest):
+    if not supabase:
+        return {"error": "Database not configured"}
+
+    try:
+        auth_header = request.headers.get("Authorization")
+        if not auth_header or not auth_header.startswith("Bearer "):
+            return {"error": "Not authenticated"}
+
+        token = auth_header.replace("Bearer ", "")
+        temp_supabase = create_client(
+            os.getenv("SUPABASE_URL"),
+            os.getenv("SUPABASE_SERVICE_ROLE_KEY") or os.getenv("SUPABASE_ANON_KEY")
+        )
+
+        user_response = temp_supabase.auth.get_user(token)
+        if not user_response.user:
+            return {"error": "Invalid token"}
+
+        student_id = str(user_response.user.id)
+
+        # Use RPC function to join class
+        result = supabase.rpc("join_class_by_code", {"p_code": join_data.code.upper()}).execute()
+
+        if result.data and result.data.get("success"):
+            return {
+                "success": True,
+                "message": "Successfully joined class",
+                "class_id": result.data.get("class_id")
+            }
+        else:
+            return {"error": result.data.get("error", "Failed to join class")}
+
+    except Exception as e:
+        print(f"Error joining class: {e}")
+        return {"error": f"Failed to join class: {str(e)}"}
+
+# ENDPOINT 13: Get student's enrolled classes
+# Call: GET /student/classes
+@app.get("/student/classes")
+def get_student_classes(request: Request):
+    if not supabase:
+        return {"error": "Database not configured"}
+
+    try:
+        auth_header = request.headers.get("Authorization")
+        if not auth_header or not auth_header.startswith("Bearer "):
+            return {"error": "Not authenticated"}
+
+        token = auth_header.replace("Bearer ", "")
+        temp_supabase = create_client(
+            os.getenv("SUPABASE_URL"),
+            os.getenv("SUPABASE_SERVICE_ROLE_KEY") or os.getenv("SUPABASE_ANON_KEY")
+        )
+
+        user_response = temp_supabase.auth.get_user(token)
+        if not user_response.user:
+            return {"error": "Invalid token"}
+
+        student_id = str(user_response.user.id)
+
+        # Get enrolled classes with class details
+        enrollments = supabase.table("class_enrollments").select("""
+            id,
+            enrolled_at,
+            role,
+            classes!inner(id, name, description, code, educator_id, max_team_size, ai_preferences)
+        """).eq("student_id", student_id).execute()
+
+        classes = []
+        if enrollments.data:
+            for enrollment in enrollments.data:
+                class_data = enrollment["classes"]
+                classes.append({
+                    "id": class_data["id"],
+                    "name": class_data["name"],
+                    "description": class_data["description"],
+                    "code": class_data["code"],
+                    "enrolled_at": enrollment["enrolled_at"],
+                    "role": enrollment["role"],
+                    "max_team_size": class_data["max_team_size"],
+                    "ai_preferences": class_data["ai_preferences"]
+                })
+
+        return {"classes": classes}
+
+    except Exception as e:
+        print(f"Error fetching student classes: {e}")
+        return {"error": f"Failed to fetch classes: {str(e)}"}
+
+# ENDPOINT 14: Generate teams for a specific class
+# Call: POST /educator/classes/{class_id}/generate-teams
+@app.post("/educator/classes/{class_id}/generate-teams")
+def generate_class_teams(class_id: str, request: Request):
+    try:
+        supabase_url = os.getenv("SUPABASE_URL")
+        service_role_key = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
+        anon_key = os.getenv("SUPABASE_ANON_KEY")
+
+        if not supabase_url:
+            return {"error": "Database not configured: SUPABASE_URL is missing"}
+
+        if not service_role_key:
+            return {"error": "Backend misconfigured: SUPABASE_SERVICE_ROLE_KEY is required to generate teams"}
+
+        auth_header = request.headers.get("Authorization")
+        if not auth_header or not auth_header.startswith("Bearer "):
+            return {"error": "Not authenticated"}
+
+        token = auth_header.replace("Bearer ", "")
+
+        # Use anon (or service key fallback) only for token validation.
+        auth_client = create_client(supabase_url, anon_key or service_role_key)
+        admin_supabase = create_client(supabase_url, service_role_key)
+
+        user_response = auth_client.auth.get_user(token)
+        if not user_response.user:
+            return {"error": "Invalid token"}
+
+        educator_id = str(user_response.user.id)
+
+        # Verify educator owns this class
+        class_result = admin_supabase.table("classes").select("*").eq("id", class_id).eq("educator_id", educator_id).execute()
+
+        if not class_result.data:
+            return {"error": "Class not found or access denied"}
+
+        class_data = class_result.data[0]
+
+        # Get enrolled students who have completed surveys
+        enrolled_students = admin_supabase.table("class_enrollments").select("""
+            student_id,
+            student_profiles!inner(
+                id,
+                survey_name,
+                profile_survey_completed_at,
+                survey_confidence_coding,
+                survey_confidence_written_reports,
+                survey_confidence_presentation_public_speaking,
+                survey_confidence_mathematical_literacy,
+                survey_confidence_conflict_resolution,
+                survey_approach_deadline,
+                survey_approach_communication,
+                survey_approach_teammate_work
+            )
+        """).eq("class_id", class_id).execute()
+
+        if not enrolled_students.data:
+            return {"error": "No students enrolled in this class"}
+
+        # Filter to only students with completed surveys
+        valid_students = []
+        for enrollment in enrolled_students.data:
+            student = enrollment["student_profiles"]
+            if student.get("profile_survey_completed_at"):
+                valid_students.append({
+                    "id": student["id"],
+                    "survey_name": student.get("survey_name"),
+                    "survey_confidence_coding": student.get("survey_confidence_coding"),
+                    "survey_confidence_written_reports": student.get("survey_confidence_written_reports"),
+                    "survey_confidence_presentation_public_speaking": student.get("survey_confidence_presentation_public_speaking"),
+                    "survey_confidence_mathematical_literacy": student.get("survey_confidence_mathematical_literacy"),
+                    "survey_confidence_conflict_resolution": student.get("survey_confidence_conflict_resolution"),
+                    "survey_approach_deadline": student.get("survey_approach_deadline"),
+                    "survey_approach_communication": student.get("survey_approach_communication"),
+                    "survey_approach_teammate_work": student.get("survey_approach_teammate_work")
+                })
+
+        if len(valid_students) < 2:
+            return {"error": "Need at least 2 students with completed surveys to generate teams"}
+
+        # Generate teams using AI with class-specific preferences
+        matches = match_students(valid_students, class_data.get("ai_preferences", {}))
+
+        if isinstance(matches, dict) and "error" in matches:
+            return matches
+
+        # Regeneration should replace existing class teams, not append more.
+        existing_teams_result = admin_supabase.table("teams").select("id").eq("class_id", class_id).execute()
+        existing_team_ids = [team["id"] for team in (existing_teams_result.data or []) if team.get("id")]
+
+        if existing_team_ids:
+            # Remove old team assignments for students currently linked to this class's teams.
+            admin_supabase.table("student_profiles").update({"team_id": None}).in_("team_id", existing_team_ids).execute()
+            # Delete old teams for this class (messages/feedback cascade via FK).
+            admin_supabase.table("teams").delete().eq("class_id", class_id).execute()
+
+        # Save teams with class_id
+        if "groups" in matches:
+            for group in matches["groups"]:
+                group["class_id"] = class_id
+
+        save_teams(matches, class_id)
+
+        return {"matches": matches, "class_id": class_id}
+
+    except Exception as e:
+        print(f"Error generating teams: {e}")
+        return {"error": f"Failed to generate teams: {str(e)}"}
 
 # NOTE: get_current_user helper is unused after this messaging fix.
 

@@ -10,7 +10,11 @@ interface TeamFeedbackAverage {
   count: number;
 }
 
-export function FeedbackAnalyticsPanel() {
+interface FeedbackAnalyticsPanelProps {
+  classId: string;
+}
+
+export function FeedbackAnalyticsPanel({ classId }: FeedbackAnalyticsPanelProps) {
   const [averages, setAverages] = useState<TeamFeedbackAverage[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -25,8 +29,8 @@ export function FeedbackAnalyticsPanel() {
 
       try {
         const [{ data: feedbackData, error: feedbackError }, { data: teamData, error: teamError }] = await Promise.all([
-          supabase.from("feedback").select("team_id, overall_satisfaction"),
-          supabase.from("teams").select("id, name"),
+          supabase.from("feedback").select("team_id, overall_satisfaction").eq("class_id", classId),
+          supabase.from("teams").select("id, name").eq("class_id", classId),
         ]);
 
         if (feedbackError) {
@@ -73,7 +77,7 @@ export function FeedbackAnalyticsPanel() {
     return () => {
       isMounted = false;
     };
-  }, []);
+  }, [classId]);
 
   if (isLoading) {
     return (

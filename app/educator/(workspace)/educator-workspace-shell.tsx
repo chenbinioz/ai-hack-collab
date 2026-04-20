@@ -6,8 +6,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { useStudentAuth } from "@/app/providers";
 
 const tabs = [
-  { href: "/educator/survey-results", label: "Student survey results" },
-  { href: "/educator/sort-groups", label: "Sort groups" },
+  { href: "/educator/classes", label: "Classes" },
 ] as const;
 
 export function EducatorWorkspaceShell({ children }: { children: React.ReactNode }) {

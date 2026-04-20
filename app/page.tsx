@@ -80,7 +80,7 @@ export default function Home() {
               Educator log in
             </Link>
             <a
-              href="#get-started"
+              href="#join"
               className="rounded-lg bg-brand px-3 py-2 text-xs font-semibold text-white shadow-sm transition hover:bg-brand-deep sm:px-4 sm:text-sm"
             >
               Get started
@@ -206,9 +206,10 @@ export default function Home() {
                       1
                     </span>
                     <div>
-                      <h3 className="font-semibold text-foreground">Join your course space</h3>
+                      <h3 className="font-semibold text-foreground">Share learning-relevant preferences</h3>
                       <p className="mt-1 text-sm text-muted">
-                        Enter an invite or module code. You only see others taking the same assessed work.
+                        Background topics you are confident in, areas you want to grow, and how you like to
+                        collaborate. Nothing about appearance.
                       </p>
                     </div>
                   </li>
@@ -217,10 +218,9 @@ export default function Home() {
                       2
                     </span>
                     <div>
-                      <h3 className="font-semibold text-foreground">Share learning-relevant preferences</h3>
+                      <h3 className="font-semibold text-foreground">Join your course space</h3>
                       <p className="mt-1 text-sm text-muted">
-                        Background topics you are confident in, areas you want to grow, and how you like to
-                        collaborate. Nothing about appearance.
+                        Enter an invite or module code. You only see others taking the same assessed work.
                       </p>
                     </div>
                   </li>
@@ -231,8 +231,7 @@ export default function Home() {
                     <div>
                       <h3 className="font-semibold text-foreground">Get placed and get started</h3>
                       <p className="mt-1 text-sm text-muted">
-                        Receive your group with a brief explanation of fit. Swap windows may apply if your
-                        institution allows it.
+                        Receive your group with a brief explanation of why you were matched together.
                       </p>
                     </div>
                   </li>

@@ -7,13 +7,14 @@ interface FeedbackModalProps {
   open: boolean;
   teamName: string;
   teamId: string;
+  classId?: string;
   onClose: () => void;
   onSubmitted: () => void;
 }
 
 const RATINGS = [1, 2, 3, 4, 5] as const;
 
-export function FeedbackModal({ open, teamName, teamId, onClose, onSubmitted }: FeedbackModalProps) {
+export function FeedbackModal({ open, teamName, teamId, classId, onClose, onSubmitted }: FeedbackModalProps) {
   const [skillMatch, setSkillMatch] = useState<number | null>(null);
   const [styleMatch, setStyleMatch] = useState<number | null>(null);
   const [overallSatisfaction, setOverallSatisfaction] = useState<number | null>(null);
@@ -62,6 +63,7 @@ export function FeedbackModal({ open, teamName, teamId, onClose, onSubmitted }: 
     const payload = {
       student_id: userResult.data.user.id,
       team_id: teamId,
+      class_id: classId,
       skill_match: skillMatch,
       style_match: styleMatch,
       overall_satisfaction: overallSatisfaction,

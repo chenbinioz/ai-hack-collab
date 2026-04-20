@@ -22,7 +22,11 @@ type StudentProfile = {
   team_id: string | null;
 };
 
-export function TeamHub() {
+interface TeamHubProps {
+  classId?: string; // Optional: if provided, only show teams from this class
+}
+
+export function TeamHub({ classId }: TeamHubProps = {}) {
   const [team, setTeam] = useState<Team | null>(null);
   const [teammates, setTeammates] = useState<Teammate[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -65,37 +69,71 @@ export function TeamHub() {
       }
 
       // Check if user has already submitted feedback for this team
-      const { data: existingFeedback } = await supabase
+      const feedbackQuery = supabase
         .from("feedback")
         .select("id")
         .eq("student_id", user.id)
         .eq("team_id", currentUserProfile.team_id)
         .limit(1);
 
+      // If classId is provided, also filter feedback by class
+      if (classId) {
+        feedbackQuery.eq("class_id", classId);
+      }
+
+      const { data: existingFeedback } = await feedbackQuery;
+
       setHasSubmittedFeedback(!!(existingFeedback && existingFeedback.length > 0));
 
-      // Fetch team details and teammates directly from Supabase
-      // This is more reliable and secure than calling the educator-facing backend
-      const { data: teamData, error: teamError } = await supabase
+      // Fetch team details - filter by class if provided
+      let teamQuery = supabase
         .from("teams")
         .select("*")
-        .eq("id", currentUserProfile.team_id)
-        .single();
+        .eq("id", currentUserProfile.team_id);
+
+      if (classId) {
+        teamQuery = teamQuery.eq("class_id", classId);
+      }
+
+      const { data: teamData, error: teamError } = await teamQuery.single();
 
       if (teamError || !teamData) {
+        // If classId is specified and team doesn't belong to that class, show no team
+        if (classId) {
+          setTeam(null);
+          setTeammates([]);
+          return;
+        }
         throw new Error("Team not found");
       }
 
-      // Fetch teammates via RPC to avoid recursive RLS issues
-      const { data: teammatesData, error: teammatesError } = await supabase
+      setTeam(teamData);
+
+      // Use security-definer RPC for teammate visibility under RLS.
+      let { data: teammatesData, error: teammatesError } = await supabase
         .rpc("get_my_teammates");
 
       if (teammatesError) {
-        throw teammatesError;
+        // Fallback for environments where the RPC migration is not yet applied.
+        const fallback = await supabase
+          .from("student_profiles")
+          .select("id, survey_name")
+          .eq("team_id", currentUserProfile.team_id)
+          .neq("id", user.id);
+        teammatesData = fallback.data;
+        teammatesError = fallback.error;
+      }
+
+      if (teammatesError) {
+        console.error("Error fetching teammates:", teammatesError);
+        setTeammates([]);
+      } else {
+        setTeammates(teammatesData || []);
       }
 
       // Filter to only those in the same team, excluding current user
-      const teamTeammates = (teammatesData || []).filter((student) =>
+      const rpcTeammates = (teammatesData || []) as Teammate[];
+      const teamTeammates = rpcTeammates.filter((student: Teammate) =>
         student.id !== user.id
       );
 
@@ -280,6 +318,7 @@ export function TeamHub() {
             open={showFeedbackModal}
             teamName={team.name}
             teamId={team.id}
+            classId={classId}
             onClose={() => setShowFeedbackModal(false)}
             onSubmitted={() => setHasSubmittedFeedback(true)}
           />
