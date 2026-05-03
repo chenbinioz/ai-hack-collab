@@ -48,25 +48,28 @@ export default function Home() {
   return (
     <div className="flex min-h-full flex-col">
       <header className="sticky top-0 z-50 border-b border-black/5 bg-surface/80 backdrop-blur-md dark:border-white/10">
-        <div className="mx-auto flex h-16 max-w-6xl items-center justify-between gap-4 px-4 sm:px-6">
+        <div className="mx-auto flex h-16 max-w-6xl items-center gap-4 px-4 sm:px-6">
           <Link href="/" className="flex items-center gap-2 font-semibold tracking-tight text-foreground">
             <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-linear-to-br from-brand to-brand-deep text-white shadow-sm">
               <IconSpark className="h-5 w-5" />
             </span>
             <span>Cohort Connect</span>
           </Link>
-          <nav className="hidden items-center gap-8 text-sm font-medium text-muted md:flex" aria-label="Primary">
-            <a href="#how" className="transition-colors hover:text-foreground">
-              How it works
-            </a>
-            <a href="#principles" className="transition-colors hover:text-foreground">
-              Principles
-            </a>
-            <a href="#educators" className="transition-colors hover:text-foreground">
-              For educators
-            </a>
-          </nav>
-          <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
+          <div className="ml-auto hidden items-center gap-6 md:flex">
+            <nav className="flex items-center gap-6 text-sm font-medium text-muted" aria-label="Primary">
+              <a href="#how" className="transition-colors hover:text-foreground">
+                How it works
+              </a>
+              <a href="#principles" className="transition-colors hover:text-foreground">
+                Principles
+              </a>
+              <a href="#educators" className="transition-colors hover:text-foreground">
+                For educators
+              </a>
+            </nav>
+            <span className="h-5 w-px bg-black/10 dark:bg-white/15" aria-hidden />
+          </div>
+          <div className="ml-auto flex shrink-0 items-center gap-2 md:ml-0 md:gap-1.5">
             <Link
               href="/login/student"
               className="rounded-lg px-3 py-2 text-xs font-medium text-muted transition-colors hover:text-foreground sm:text-sm"
@@ -103,7 +106,7 @@ export default function Home() {
               Coursework groups that fit how you learn — not arbitrary grouping.
             </h1>
             <p className="mt-6 max-w-2xl text-lg leading-relaxed text-muted sm:text-xl">
-              Cohort Connect places students on the same course — Chemistry, Physics, and more — into balanced
+              Cohort Connect places students on the same course into balanced
               project teams using academic background and attitudes to collaboration. Fairer groups, fewer
               awkward mismatches, and a clearer path to doing your best work together.
             </p>
@@ -181,10 +184,10 @@ export default function Home() {
                 <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-brand/15 text-brand">
                   <IconChat className="h-6 w-6" />
                 </span>
-                <h3 className="mt-4 text-lg font-semibold text-foreground">Collaboration that suits you</h3>
+                <h3 className="mt-4 text-lg font-semibold text-foreground">Collaboration preferences included</h3>
                 <p className="mt-2 flex-1 text-sm leading-relaxed text-muted">
-                  Optional prompts on communication style, meeting rhythm, and how you handle feedback help match
-                  people who can work well together — without stereotyping or profiling.
+                  Survey responses about communication, deadlines, and feedback are included when creating
+                  balanced teams.
                 </p>
               </li>
             </ul>
@@ -220,7 +223,7 @@ export default function Home() {
                     <div>
                       <h3 className="font-semibold text-foreground">Join your course space</h3>
                       <p className="mt-1 text-sm text-muted">
-                        Enter an invite or module code. You only see others taking the same assessed work.
+                        Enter a class invite code. You only see others taking the same assessed work.
                       </p>
                     </div>
                   </li>
@@ -240,7 +243,7 @@ export default function Home() {
               <div className="rounded-2xl border border-black/6 bg-surface p-6 shadow-lg dark:border-white/10">
                 <div className="flex items-center justify-between border-b border-black/6 pb-4 dark:border-white/10">
                   <span className="text-sm font-semibold text-foreground">Your cohort — CHM201</span>
-                  <span className="rounded-md bg-accent/15 px-2 py-0.5 text-xs font-medium text-accent">Live</span>
+                  <span className="rounded-md bg-accent/15 px-2 py-0.5 text-xs font-medium text-accent">Current</span>
                 </div>
                 <ul className="mt-4 space-y-3">
                   <li className="flex items-center justify-between rounded-xl bg-background px-4 py-3 text-sm">
@@ -271,8 +274,8 @@ export default function Home() {
             <div className="mx-auto max-w-3xl text-center">
               <h2 className="text-2xl font-bold tracking-tight text-foreground sm:text-3xl">For lecturers and module leads</h2>
               <p className="mt-4 text-muted">
-                Define cohort size, mixing rules, and deadlines in one place. Export group lists or push to your
-                VLE when you are ready — without spending hours on spreadsheets.
+                Define cohort size, mixing rules, and deadlines in one place — without spending hours on
+                spreadsheets.
               </p>
               <a
                 href="#contact"

@@ -93,7 +93,6 @@ export function FeedbackModal({ open, teamName, teamId, classId, onClose, onSubm
           <div>
             <p className="text-sm font-semibold uppercase tracking-[0.2em] text-brand">Instant Sentiment</p>
             <h2 className="mt-3 text-xl font-semibold text-foreground">How did your team feel?</h2>
-            <p className="mt-2 text-sm text-muted">Share your first impression of the team you just saw.</p>
           </div>
           <button
             type="button"

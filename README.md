@@ -1,5 +1,7 @@
 # Grand Challenge 2: Cohort Connect
-This project is designed to address Grand Challenge 2
+Team name: Cohort Connect
+
+This project is designed to address Grand Challenge 2.
 
 Problem Statement:
 Current group formation methods priorities convenience over compatibility, leading to inefficient and often unenjoyable experiences. Incompatible matches can lead to isolation, poorer academic performance, and an overall negative perception of group work as a burden rather than an opportunity. 
@@ -72,14 +74,14 @@ graph TD
 ```bash
 cd backend
 pip install -r requirements.txt
-# Add SUPABASE_URL and SERVICE_ROLE_KEY to .env
+# Add SUPABASE_URL, SUPABASE_ANON_KEY, SUPABASE_SERVICE_ROLE_KEY, and GEMINI_API_KEY to `.env`
 uvicorn main:app --reload
 ```
 ### 3. Frontend Setup
 ```bash
-cd frontend
+cd /Users/adamfox/ai-hack-collab-1
 npm install
-# Add NEXT_PUBLIC_SUPABASE_URL and ANON_KEY to .env.local
+# Add NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY to `.env.local` if needed
 npm run dev
 ```
 ## 📖 Usage Guide
@@ -97,9 +99,22 @@ npm run dev
 
 3. Review & Analytics: View the formed teams and monitor student satisfaction scores through the real-time feedback analytics.
 
+## 📷 Screenshots
 
-**🎥 Demo Video**
-[Link to Demo Video Here]
+The README uses screenshots stored in `public/screenshots/`.
+
+![Homepage](public/screenshots/homepage.png)
+![Login page](public/screenshots/login.png)
+![Student login](public/screenshots/student-login.png)
+
+
+## 📁 Documentation
+
+Additional competition documentation lives in `docs/`:
+
+- [Technical specifications](docs/technical-specifications.md)
+- [Sample data and test cases](docs/sample-data.md)
+- [Team coaching system](TEAM_COACHING_SYSTEM.md)
 
 ## 👥 Team Member Details and Contributions
 * **Chenbo Zhnag (Data Lead):** Designed the relational schema, SQL triggers for automated student/teacher routing, RLS security policies, and the data-locking mechanism.

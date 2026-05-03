@@ -114,7 +114,6 @@ export async function POST(request: NextRequest) {
         focus_skills: true,
         focus_working_style: true,
         focus_availability: true,
-        focus_goals: true,
         balance_diversity: true,
       },
     };

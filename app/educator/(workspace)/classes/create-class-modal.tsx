@@ -17,7 +17,6 @@ interface ClassFormData {
     focus_skills: boolean;
     focus_working_style: boolean;
     focus_availability: boolean;
-    focus_goals: boolean;
     balance_diversity: boolean;
   };
 }
@@ -34,7 +33,6 @@ export function CreateClassModal({ onClose, onClassCreated }: CreateClassModalPr
       focus_skills: true,
       focus_working_style: true,
       focus_availability: true,
-      focus_goals: true,
       balance_diversity: true,
     },
   });
@@ -182,7 +180,6 @@ export function CreateClassModal({ onClose, onClassCreated }: CreateClassModalPr
                 { key: "focus_skills" as const, label: "Skill complementarity", description: "Match students with different technical skills" },
                 { key: "focus_working_style" as const, label: "Working style compatibility", description: "Consider communication and deadline preferences" },
                 { key: "focus_availability" as const, label: "Schedule compatibility", description: "Match students with similar availability" },
-                { key: "focus_goals" as const, label: "Project goals alignment", description: "Group students with similar project interests" },
                 { key: "balance_diversity" as const, label: "Balance team diversity", description: "Create diverse teams with varied backgrounds" },
               ].map(({ key, label, description }) => (
                 <label key={key} className="flex items-start gap-3 cursor-pointer">

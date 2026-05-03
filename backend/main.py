@@ -241,7 +241,6 @@ class ClassCreateRequest(BaseModel):
         "focus_skills": True,
         "focus_working_style": True,
         "focus_availability": True,
-        "focus_goals": True,
         "balance_diversity": True
     }
 
@@ -546,14 +545,23 @@ def generate_class_teams(class_id: str, request: Request):
                 id,
                 survey_name,
                 profile_survey_completed_at,
+                survey_alevel_or_equivalent_titles,
+                survey_ancillary_module,
                 survey_confidence_coding,
                 survey_confidence_written_reports,
                 survey_confidence_presentation_public_speaking,
                 survey_confidence_mathematical_literacy,
+                survey_confidence_abstract_complex_content,
                 survey_confidence_conflict_resolution,
                 survey_approach_deadline,
+                survey_approach_discussion,
+                survey_approach_disagreement,
+                survey_approach_new_concepts,
                 survey_approach_communication,
-                survey_approach_teammate_work
+                survey_approach_teammate_work,
+                survey_approach_heavy_workload,
+                survey_approach_group_project_role,
+                survey_approach_critical_feedback
             )
         """).eq("class_id", class_id).execute()
 
@@ -568,21 +576,95 @@ def generate_class_teams(class_id: str, request: Request):
                 valid_students.append({
                     "id": student["id"],
                     "survey_name": student.get("survey_name"),
+                    "survey_alevel_or_equivalent_titles": student.get("survey_alevel_or_equivalent_titles"),
+                    "survey_ancillary_module": student.get("survey_ancillary_module"),
                     "survey_confidence_coding": student.get("survey_confidence_coding"),
                     "survey_confidence_written_reports": student.get("survey_confidence_written_reports"),
                     "survey_confidence_presentation_public_speaking": student.get("survey_confidence_presentation_public_speaking"),
                     "survey_confidence_mathematical_literacy": student.get("survey_confidence_mathematical_literacy"),
+                    "survey_confidence_abstract_complex_content": student.get("survey_confidence_abstract_complex_content"),
                     "survey_confidence_conflict_resolution": student.get("survey_confidence_conflict_resolution"),
                     "survey_approach_deadline": student.get("survey_approach_deadline"),
+                    "survey_approach_discussion": student.get("survey_approach_discussion"),
+                    "survey_approach_disagreement": student.get("survey_approach_disagreement"),
+                    "survey_approach_new_concepts": student.get("survey_approach_new_concepts"),
                     "survey_approach_communication": student.get("survey_approach_communication"),
-                    "survey_approach_teammate_work": student.get("survey_approach_teammate_work")
+                    "survey_approach_teammate_work": student.get("survey_approach_teammate_work"),
+                    "survey_approach_heavy_workload": student.get("survey_approach_heavy_workload"),
+                    "survey_approach_group_project_role": student.get("survey_approach_group_project_role"),
+                    "survey_approach_critical_feedback": student.get("survey_approach_critical_feedback"),
                 })
 
         if len(valid_students) < 2:
             return {"error": "Need at least 2 students with completed surveys to generate teams"}
 
+        required_fields = [
+            "survey_alevel_or_equivalent_titles",
+            "survey_ancillary_module",
+            "survey_confidence_coding",
+            "survey_confidence_written_reports",
+            "survey_confidence_presentation_public_speaking",
+            "survey_confidence_mathematical_literacy",
+            "survey_confidence_abstract_complex_content",
+            "survey_confidence_conflict_resolution",
+            "survey_approach_deadline",
+            "survey_approach_discussion",
+            "survey_approach_disagreement",
+            "survey_approach_new_concepts",
+            "survey_approach_communication",
+            "survey_approach_teammate_work",
+            "survey_approach_heavy_workload",
+            "survey_approach_group_project_role",
+            "survey_approach_critical_feedback",
+        ]
+
+        students_missing_fields = []
+        for student in valid_students:
+            missing = []
+            for field_name in required_fields:
+                value = student.get(field_name)
+                if value is None:
+                    missing.append(field_name)
+                    continue
+
+                if field_name == "survey_alevel_or_equivalent_titles":
+                    if isinstance(value, list) and len(value) == 0:
+                        missing.append(field_name)
+                    elif isinstance(value, str) and not value.strip():
+                        missing.append(field_name)
+
+                if isinstance(value, str) and not value.strip():
+                    missing.append(field_name)
+
+            if missing:
+                students_missing_fields.append(
+                    {
+                        "student_id": student.get("id"),
+                        "student_name": student.get("survey_name") or "Unnamed student",
+                        "missing_fields": sorted(list(set(missing))),
+                    }
+                )
+
+        if students_missing_fields:
+            student_names = ", ".join(item["student_name"] for item in students_missing_fields)
+            return {
+                "error": (
+                    "Cannot run AI matching because some required survey values are missing. "
+                    "Please ask these students to complete the profile survey again: "
+                    f"{student_names}."
+                ),
+                "students_requiring_resurvey": students_missing_fields,
+            }
+
+        class_goal_hint = (class_data.get("description") or class_data.get("name") or "").strip()
+        class_context = {
+            "coursework_deadline": class_data.get("coursework_deadline"),
+            "project_goal_hint": class_goal_hint,
+            "max_team_size": class_data.get("max_team_size", 3),
+        }
+
         # Generate teams using AI with class-specific preferences
-        matches = match_students(valid_students, class_data.get("ai_preferences", {}))
+        matches = match_students(valid_students, class_data.get("ai_preferences", {}), class_context)
 
         if isinstance(matches, dict) and "error" in matches:
             return matches
@@ -591,18 +673,22 @@ def generate_class_teams(class_id: str, request: Request):
         existing_teams_result = admin_supabase.table("teams").select("id").eq("class_id", class_id).execute()
         existing_team_ids = [team["id"] for team in (existing_teams_result.data or []) if team.get("id")]
 
-        if existing_team_ids:
-            # Remove old team assignments for students currently linked to this class's teams.
-            admin_supabase.table("student_profiles").update({"team_id": None}).in_("team_id", existing_team_ids).execute()
-            # Delete old teams for this class (messages/feedback cascade via FK).
-            admin_supabase.table("teams").delete().eq("class_id", class_id).execute()
+        # We'll create new teams first, then remove the old teams to avoid briefly ungrouping students.
 
         # Save teams with class_id
         if "groups" in matches:
             for group in matches["groups"]:
                 group["class_id"] = class_id
 
-        save_teams(matches, class_id)
+        # Create new teams and get their IDs
+        created_team_ids = save_teams(matches, class_id, max_team_size=class_data.get("max_team_size", 3)) or []
+
+        # Now it's safe to delete old teams (they won't be referenced by students anymore)
+        if existing_team_ids:
+            try:
+                admin_supabase.table("teams").delete().in_("id", existing_team_ids).execute()
+            except Exception as del_err:
+                print(f"Warning: Failed to delete old teams: {del_err}")
 
         return {"matches": matches, "class_id": class_id}
 

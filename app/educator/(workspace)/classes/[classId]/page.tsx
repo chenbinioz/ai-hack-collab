@@ -29,6 +29,15 @@ interface Team {
   name: string;
   reason: string;
   created_at: string;
+  match_explanation?: {
+    factor_weights?: Record<string, number>;
+    match_trace?: Array<{
+      factor?: string;
+      label?: string;
+      evidence?: string;
+      weight?: number;
+    }>;
+  } | null;
 }
 
 interface SurveyResponse {
@@ -97,6 +106,30 @@ export default function ClassManagementPage() {
   const API_BASE_URL = process.env.NODE_ENV === "development"
     ? "http://localhost:8000"
     : (process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000");
+
+  const factorLabelMap: Record<string, string> = {
+    deadline_preference: "Deadline management",
+    discussion_preference: "Discussion style",
+    critical_feedback_preference: "Comfort with critical feedback",
+    disagreement_preference: "Conflict handling",
+    new_concepts_preference: "Openness to new concepts",
+    teammate_work_preference: "Preferred work distribution",
+    deadline_working_pattern: "Deadline work rhythm",
+  };
+
+  const formatFactorLabel = (factor: string) =>
+    factorLabelMap[factor] ?? factor
+      .split("_")
+      .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+      .join(" ");
+
+  const sortedFactorWeights = (weights?: Record<string, number>) => {
+    if (!weights) return [];
+
+    return Object.entries(weights)
+      .filter((entry) => Number.isFinite(entry[1]))
+      .sort((a, b) => b[1] - a[1]);
+  };
 
   useEffect(() => {
     if (classId) {
@@ -783,6 +816,48 @@ export default function ClassManagementPage() {
               >
                 <h3 className="font-semibold text-foreground mb-2">{team.name}</h3>
                 <p className="text-sm text-muted mb-3">{team.reason}</p>
+
+                {team.match_explanation?.factor_weights ? (
+                  <div className="mb-4 rounded-xl border border-black/5 bg-background/70 p-3 dark:border-white/10">
+                    <p className="text-xs font-semibold uppercase tracking-wide text-muted">Factor weights</p>
+                    <div className="mt-3 space-y-2">
+                      {sortedFactorWeights(team.match_explanation.factor_weights).map(([factor, weight]) => {
+                        const percentage = Math.max(0, Math.min(100, Math.round(weight * 100)));
+                        return (
+                          <div key={factor}>
+                            <div className="mb-1 flex items-center justify-between text-xs text-muted">
+                              <span>{formatFactorLabel(factor)}</span>
+                              <span>{percentage}%</span>
+                            </div>
+                            <div className="h-2 overflow-hidden rounded-full bg-black/10 dark:bg-white/10">
+                              <div
+                                className="h-full rounded-full bg-brand"
+                                style={{ width: `${percentage}%` }}
+                              />
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                ) : null}
+
+                {team.match_explanation?.match_trace && team.match_explanation.match_trace.length > 0 ? (
+                  <div className="mb-3 rounded-xl border border-black/5 bg-background/70 p-3 dark:border-white/10">
+                    <p className="text-xs font-semibold uppercase tracking-wide text-muted">Why matched trace</p>
+                    <ul className="mt-2 space-y-2">
+                      {team.match_explanation.match_trace.map((trace, index) => (
+                        <li key={`${team.id}-trace-${index}`} className="rounded-lg bg-black/[0.03] px-2.5 py-2 text-xs text-foreground dark:bg-white/[0.05]">
+                          <span className="font-semibold">
+                            {trace.label ? formatFactorLabel(trace.label) : (trace.factor ? formatFactorLabel(trace.factor) : `Signal ${index + 1}`)}:
+                          </span>{" "}
+                          {trace.evidence || "No detailed evidence provided."}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                ) : null}
+
                 <p className="text-xs text-muted">
                   Created {new Date(team.created_at).toLocaleDateString()}
                 </p>

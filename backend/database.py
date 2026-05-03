@@ -1,6 +1,7 @@
 import os
 from supabase import create_client, Client
 from dotenv import load_dotenv
+from team_coach import insert_coaching_messages
 
 load_dotenv()
 
@@ -38,24 +39,37 @@ def get_all_students():
         print(f"Supabase Select Error: {e}")
         return []
 
-def save_teams(matches_parsed, class_id=None):
+def save_teams(matches_parsed, class_id=None, max_team_size=None):
     """
     Takes parsed JSON containing groups, inserts a new 'teams' record,
     and assigns 'team_id' on the matching member 'student_profiles'.
     Now supports class-scoped teams.
+    
+    Args:
+        matches_parsed: Parsed JSON from AI matcher with groups
+        class_id: Optional class ID to scope teams
+        max_team_size: Optional max team size constraint for validation
     """
     if not supabase:
         print("Error: Supabase client is not initialized.")
         return
 
     groups = matches_parsed.get("groups", [])
+    factor_weights = matches_parsed.get("factor_weights", {})
     if not groups:
         return
         
     print(f"Starting to sync {len(groups)} AI-generated teams to Supabase...")
+    
+    # Track violations for warning
+    violations = []
+    
+    created_team_ids = []
+
     for idx, group in enumerate(groups, start=1):
         reason = group.get("reason", "")
         members = group.get("members", [])
+        match_trace = group.get("match_trace", [])
         group_class_id = group.get("class_id", class_id)  # Use group-specific class_id or fallback to parameter
         
         # Basic validation: ensure we have members and they look like valid UUIDs (36 chars)
@@ -64,10 +78,24 @@ def save_teams(matches_parsed, class_id=None):
         if not valid_members:
             print(f"Skipping Team {idx}: No valid member UUIDs found.")
             continue
+        
+        # Check for max team size violation
+        if max_team_size and len(valid_members) > max_team_size:
+            violations.append({
+                "team_index": idx,
+                "size": len(valid_members),
+                "max_allowed": max_team_size,
+                "members": valid_members
+            })
+            print(f"⚠️  Team {idx} violates max size: {len(valid_members)} members > {max_team_size} max (STILL CREATING - consider regenerating)")
 
         team_insert = {
             "name": f"Team {idx}",
-            "reason": reason
+            "reason": reason,
+            "match_explanation": {
+                "factor_weights": factor_weights,
+                "match_trace": match_trace,
+            },
         }
 
         # Add class_id if provided
@@ -83,6 +111,7 @@ def save_teams(matches_parsed, class_id=None):
                 continue
 
             team_id = team_res.data[0]["id"]
+            created_team_ids.append(team_id)
 
             # 2. Update all members of this team in ONE request (Batch Update)
             # This is significantly faster than one-by-one updates
@@ -90,10 +119,33 @@ def save_teams(matches_parsed, class_id=None):
 
             print(f"Successfully created Team {idx} and assigned {len(update_res.data)} students.")
             
+            # 3. Generate and insert coaching messages for the team
+            try:
+                # Fetch full profiles for team members (for skill analysis)
+                member_profiles_res = supabase.table("student_profiles").select("*").in_("id", valid_members).execute()
+                if member_profiles_res.data:
+                    team_name = team_insert.get("name", f"Team {idx}")
+                    print(f"  → Generating coaching for {team_name} ({len(member_profiles_res.data)} members)...")
+                    insert_coaching_messages(supabase, team_id, team_name, member_profiles_res.data)
+                else:
+                    print(f"  ⚠️  Could not fetch profiles for team {idx}")
+            except Exception as coach_err:
+                print(f"❌ Error generating coaching for Team {idx}: {coach_err}")
+                import traceback
+                traceback.print_exc()
+            
         except Exception as e:
             print(f"Supabase Error processing Team {idx}: {e}")
     
+    # Report any violations
+    if violations:
+        print(f"\n⚠️  TEAM SIZE VIOLATIONS DETECTED ({len(violations)} teams):")
+        for v in violations:
+            print(f"  - Team {v['team_index']}: {v['size']} members (max: {v['max_allowed']})")
+        print("  → Consider regenerating teams with the constraint properly applied\n")
+    
     print("AI Team sync complete.")
+    return created_team_ids
 
 def get_all_teams():
     """

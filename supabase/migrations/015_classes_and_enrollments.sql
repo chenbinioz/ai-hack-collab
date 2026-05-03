@@ -13,7 +13,6 @@ CREATE TABLE IF NOT EXISTS public.classes (
     "focus_skills": true,
     "focus_working_style": true,
     "focus_availability": true,
-    "focus_goals": true,
     "balance_diversity": true
   }'::jsonb,
   created_at timestamptz DEFAULT now(),
