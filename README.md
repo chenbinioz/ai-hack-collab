@@ -99,6 +99,10 @@ npm run dev
 
 3. Review & Analytics: View the formed teams and monitor student satisfaction scores through the real-time feedback analytics.
 
+## Demo Video
+
+Link: https://www.youtube.com/watch?v=fv-j6s-_jes
+
 ## 📷 Screenshots
 
 The README uses screenshots stored in `public/screenshots/`.
