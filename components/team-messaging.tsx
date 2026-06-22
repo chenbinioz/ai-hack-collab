@@ -24,6 +24,12 @@ export function TeamMessaging({ teamId, teamName }: TeamMessagingProps) {
   const [error, setError] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const supabase = createStudentBrowserClient();
+  const coachId = "00000000-0000-0000-0000-000000000001";
+
+  // Track per-message visibility timestamps and accumulated seconds
+  const startTimesRef = useRef<Record<string, number>>({});
+  const accumRef = useRef<Record<string, number>>({});
+  const observedIdsRef = useRef<Set<string>>(new Set());
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -65,6 +71,76 @@ export function TeamMessaging({ teamId, teamName }: TeamMessagingProps) {
     }, 5000);
     return () => clearInterval(interval);
   }, [teamId, fetchMessages]);
+
+  // Observe coach messages and measure how many seconds each student spends reading them.
+  useEffect(() => {
+    if (!messages || messages.length === 0) return;
+
+    const coachMessageElements: Element[] = Array.from(document.querySelectorAll('[data-coach-message="true"]')) as Element[];
+
+    // Create observer
+    const observer = new IntersectionObserver((entries) => {
+      entries.forEach((entry) => {
+        const id = (entry.target as HTMLElement).dataset.messageId;
+        if (!id) return;
+
+        if (entry.isIntersecting) {
+          // start timing
+          startTimesRef.current[id] = Date.now();
+          observedIdsRef.current.add(id);
+        } else {
+          // stop timing and add to accumulator
+          const start = startTimesRef.current[id];
+          if (start) {
+            const delta = Math.round((Date.now() - start) / 1000);
+            accumRef.current[id] = (accumRef.current[id] ?? 0) + delta;
+            delete startTimesRef.current[id];
+          }
+        }
+      });
+    }, { threshold: 0.5 });
+
+    // Observe current coach message elements
+    coachMessageElements.forEach((el) => observer.observe(el));
+
+    // Flush accumulated read times to the DB when navigating away/unmounting
+    const flush = async () => {
+      try {
+        const entries = Object.entries(accumRef.current).filter(([, seconds]) => seconds > 0);
+        if (entries.length === 0) return;
+
+        const userResult = await supabase.auth.getUser();
+        const studentId = userResult.data.user?.id;
+        if (!studentId) return;
+
+        const inserts = entries.map(([message_id, seconds]) => ({
+          student_id: studentId,
+          team_id: teamId,
+          message_id,
+          seconds,
+        }));
+
+        // Insert reading times (RLS will verify team membership)
+        await supabase.from("message_read_times").insert(inserts);
+        // Reset accumulators
+        accumRef.current = {};
+      } catch (err) {
+        // Non-fatal: logging only
+        console.error("Failed to persist message read times:", err);
+      }
+    };
+
+    window.addEventListener("beforeunload", flush);
+    return () => {
+      observer.disconnect();
+      // finalize any in-progress timers
+      Object.entries(startTimesRef.current).forEach(([id, start]) => {
+        accumRef.current[id] = (accumRef.current[id] ?? 0) + Math.round((Date.now() - start) / 1000);
+      });
+      void flush();
+      window.removeEventListener("beforeunload", flush);
+    };
+  }, [messages, supabase, teamId]);
 
 
   const sendMessage = async (e: React.FormEvent) => {
@@ -150,7 +226,11 @@ export function TeamMessaging({ teamId, teamName }: TeamMessagingProps) {
                     {formatTime(message.created_at)}
                   </span>
                 </div>
-                <div className="bg-surface rounded-lg p-3 border border-black/5">
+                <div
+                  className="bg-surface rounded-lg p-3 border border-black/5"
+                  data-message-id={message.id}
+                  data-coach-message={message.sender_id === coachId ? "true" : "false"}
+                >
                   <p className="text-sm text-foreground whitespace-pre-wrap">
                     {message.content}
                   </p>

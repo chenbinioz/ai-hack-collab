@@ -18,6 +18,7 @@ export function FeedbackAnalyticsPanel({ classId }: FeedbackAnalyticsPanelProps)
   const [averages, setAverages] = useState<TeamFeedbackAverage[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [ratingTimeMap, setRatingTimeMap] = useState<Map<number, { totalSeconds: number; count: number }>>(new Map());
 
   useEffect(() => {
     let isMounted = true;
@@ -28,9 +29,11 @@ export function FeedbackAnalyticsPanel({ classId }: FeedbackAnalyticsPanelProps)
       setLoadError(null);
 
       try {
-        const [{ data: feedbackData, error: feedbackError }, { data: teamData, error: teamError }] = await Promise.all([
-          supabase.from("feedback").select("team_id, overall_satisfaction").eq("class_id", classId),
+        const [{ data: feedbackData, error: feedbackError }, { data: teamData, error: teamError }, { data: messageReadData, error: messageReadError }] = await Promise.all([
+          supabase.from("feedback").select("team_id, overall_satisfaction, match_explanation_seconds").eq("class_id", classId),
           supabase.from("teams").select("id, name").eq("class_id", classId),
+          // message_read_times stores seconds spent reading coach messages (one row per student/message)
+          supabase.from("message_read_times").select("team_id, seconds").in("team_id", (await supabase.from("teams").select("id").eq("class_id", classId)).data?.map((t: any) => t.id) || []),
         ]);
 
         if (feedbackError) {
@@ -42,6 +45,7 @@ export function FeedbackAnalyticsPanel({ classId }: FeedbackAnalyticsPanelProps)
 
         const teamMap = new Map(teamData?.map((team: any) => [team.id, team.name]));
         const grouped = new Map<string, { total: number; count: number }>();
+        const ratingTime = new Map<number, { totalSeconds: number; count: number }>();
 
         feedbackData?.forEach((entry: any) => {
           if (!entry.team_id) return;
@@ -49,6 +53,14 @@ export function FeedbackAnalyticsPanel({ classId }: FeedbackAnalyticsPanelProps)
           group.total += entry.overall_satisfaction ?? 0;
           group.count += 1;
           grouped.set(entry.team_id, group);
+
+          const rating = entry.overall_satisfaction ?? null;
+          if (rating) {
+            const rt = ratingTime.get(rating) ?? { totalSeconds: 0, count: 0 };
+            rt.totalSeconds += (entry.match_explanation_seconds ?? 0);
+            rt.count += 1;
+            ratingTime.set(rating, rt);
+          }
         });
 
         const averages = Array.from(grouped.entries()).map(([teamId, stats]) => ({
@@ -56,10 +68,48 @@ export function FeedbackAnalyticsPanel({ classId }: FeedbackAnalyticsPanelProps)
           name: teamMap.get(teamId) ?? "Unknown team",
           average: stats.count > 0 ? stats.total / stats.count : 0,
           count: stats.count,
+          total_reading_seconds: 0,
+          avg_reading_seconds_per_submission: 0,
         }));
+
+        // compute team-level total reading time for match explanation from feedback.match_explanation_seconds
+        const readingByTeam = new Map<string, { total: number; count: number }>();
+        feedbackData?.forEach((entry: any) => {
+          if (!entry.team_id) return;
+          const current = readingByTeam.get(entry.team_id) ?? { total: 0, count: 0 };
+          current.total += (entry.match_explanation_seconds ?? 0);
+          current.count += 1;
+          readingByTeam.set(entry.team_id, current);
+        });
+
+        averages.forEach((team) => {
+          const r = readingByTeam.get(team.team_id);
+          if (r) {
+            team.total_reading_seconds = r.total;
+            team.avg_reading_seconds_per_submission = r.count > 0 ? Math.round(r.total / r.count) : 0;
+          }
+        });
+
+        // compute coach message reading seconds per team
+        const coachReading = new Map<string, { totalSeconds: number; count: number }>();
+        (messageReadData || []).forEach((row: any) => {
+          if (!row.team_id) return;
+          const cur = coachReading.get(row.team_id) ?? { totalSeconds: 0, count: 0 };
+          cur.totalSeconds += (row.seconds ?? 0);
+          cur.count += 1;
+          coachReading.set(row.team_id, cur);
+        });
+
+        // attach coachReading to team objects (we'll use ratingTimeMap to show rating/time previously stored)
+        averages.forEach((team) => {
+          const cr = coachReading.get(team.team_id);
+          (team as any).coach_total_seconds = cr ? cr.totalSeconds : 0;
+          (team as any).coach_samples = cr ? cr.count : 0;
+        });
 
         if (isMounted) {
           setAverages(averages.sort((a, b) => b.average - a.average));
+          setRatingTimeMap(new Map(ratingTime));
         }
       } catch (error: any) {
         if (isMounted) {
@@ -137,9 +187,31 @@ export function FeedbackAnalyticsPanel({ classId }: FeedbackAnalyticsPanelProps)
                     style={{ width: `${percentage}%` }}
                   />
                 </div>
+                <div className="mt-3 grid grid-cols-3 gap-2 text-xs text-muted">
+                  <div>Reads total: {(team as any).total_reading_seconds ?? 0}s</div>
+                  <div>Reads avg/submission: {(team as any).avg_reading_seconds_per_submission ?? 0}s</div>
+                  <div>Coach reads: {(team as any).coach_total_seconds ?? 0}s ({(team as any).coach_samples ?? 0})</div>
+                </div>
               </div>
             );
           })}
+        </div>
+        <div className="mt-6">
+          <h3 className="text-sm font-semibold text-foreground">Reading time vs rating</h3>
+          <p className="text-xs text-muted">Average seconds spent reading explanation, by overall rating.</p>
+          <div className="mt-3 grid grid-cols-5 gap-2">
+            {[1,2,3,4,5].map((rating) => {
+              const data = ratingTimeMap.get(rating);
+              const avg = data && data.count > 0 ? Math.round(data.totalSeconds / data.count) : 0;
+              return (
+                <div key={rating} className="rounded-2xl border border-black/5 bg-white p-3 text-center text-sm">
+                  <div className="font-semibold">{rating}</div>
+                  <div className="text-xs text-muted">{avg}s avg</div>
+                  <div className="text-xs text-muted">{data ? data.count : 0} samples</div>
+                </div>
+              );
+            })}
+          </div>
         </div>
       </section>
   );
