@@ -1,0 +1,51 @@
+INFO:     Will watch for changes in these directories: ['/Users/chenbozhang/ai-hack-collab/backend']
+INFO:     Uvicorn running on http://127.0.0.1:8000 (Press CTRL+C to quit)
+INFO:     Started reloader process [55391] using StatReload
+/Users/chenbozhang/ai-hack-collab/.venv/lib/python3.9/site-packages/urllib3/__init__.py:35: NotOpenSSLWarning: urllib3 v2 only supports OpenSSL 1.1.1+, currently the 'ssl' module is compiled with 'LibreSSL 2.8.3'. See: https://github.com/urllib3/urllib3/issues/3020
+  warnings.warn(
+INFO:     Started server process [55439]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     127.0.0.1:62322 - "GET / HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62599 - "GET /docs HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62599 - "GET /openapi.json HTTP/1.1" 200 OK
+WARNING:  StatReload detected changes in 'database.py'. Reloading...
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [55439]
+/Users/chenbozhang/ai-hack-collab/.venv/lib/python3.9/site-packages/urllib3/__init__.py:35: NotOpenSSLWarning: urllib3 v2 only supports OpenSSL 1.1.1+, currently the 'ssl' module is compiled with 'LibreSSL 2.8.3'. See: https://github.com/urllib3/urllib3/issues/3020
+  warnings.warn(
+INFO:     Started server process [63816]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+WARNING:  StatReload detected changes in 'main.py'. Reloading...
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [63816]
+/Users/chenbozhang/ai-hack-collab/.venv/lib/python3.9/site-packages/urllib3/__init__.py:35: NotOpenSSLWarning: urllib3 v2 only supports OpenSSL 1.1.1+, currently the 'ssl' module is compiled with 'LibreSSL 2.8.3'. See: https://github.com/urllib3/urllib3/issues/3020
+  warnings.warn(
+INFO:     Started server process [63828]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     127.0.0.1:56206 - "GET /docs HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56206 - "GET /openapi.json HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56237 - "GET /educator-data HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56240 - "GET /educator-data HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56277 - "GET /educator-data HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56277 - "GET /educator-data HTTP/1.1" 200 OK
+WARNING:  StatReload detected changes in 'database.py'. Reloading...
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [63828]
+/Users/chenbozhang/ai-hack-collab/.venv/lib/python3.9/site-packages/urllib3/__init__.py:35: NotOpenSSLWarning: urllib3 v2 only supports OpenSSL 1.1.1+, currently the 'ssl' module is compiled with 'LibreSSL 2.8.3'. See: https://github.com/urllib3/urllib3/issues/3020
+  warnings.warn(
+INFO:     Started server process [64013]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     127.0.0.1:60113 - "GET /educator-data HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60116 - "GET /educator-data HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60215 - "GET /educator-data HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60218 - "GET /educator-data HTTP/1.1" 200 OK

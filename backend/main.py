@@ -104,6 +104,20 @@ def get_educator_data():
     except Exception as e:
         print(f"Warning: failed to compute collaboration balance: {e}")
     
+    # Compute collaboration balance (Gini) per team using message counts
+    try:
+        team_ids = [t.get("id") for t in teams if t.get("id")]
+        balances = compute_collaboration_balance_for_teams(team_ids)
+        # Attach to team objects
+        for t in teams:
+            tid = t.get("id")
+            if tid and tid in balances:
+                t["collaboration_balance"] = balances.get(tid, 0.0)
+            else:
+                t["collaboration_balance"] = 0.0
+    except Exception as e:
+        print(f"Error computing collaboration balances: {e}")
+
     return {
         "teams": teams,
         "students": transformed_students
