@@ -162,6 +162,74 @@ def get_all_teams():
         print(f"Supabase Select Error: {e}")
         return []
 
+
+def compute_gini_from_counts(counts: list) -> float:
+    """
+    Compute the Gini coefficient for a list of non-negative counts.
+    Returns a float between 0 and 1. If all counts are zero or list empty, returns 0.
+    """
+    if not counts:
+        return 0.0
+    # Ensure floats
+    vals = [float(x) for x in counts]
+    n = len(vals)
+    if n == 0:
+        return 0.0
+    mean = sum(vals) / n
+    if mean == 0:
+        return 0.0
+    # Double sum of absolute differences
+    total_diff = 0.0
+    for i in range(n):
+        for j in range(n):
+            total_diff += abs(vals[i] - vals[j])
+    gini = total_diff / (2 * (n ** 2) * mean)
+    # Clamp
+    return max(0.0, min(1.0, gini))
+
+
+def get_team_message_counts(team_ids: list) -> dict:
+    """
+    For each team_id in team_ids, return a mapping team_id -> {sender_id: count}
+    Uses the `messages` table in Supabase.
+    """
+    result = {}
+    if not supabase or not team_ids:
+        return result
+    try:
+        # Fetch counts grouped by team_id and sender_id via a simple select
+        # We pull messages for these teams and aggregate in Python to avoid complex RPCs.
+        resp = supabase.table("messages").select("team_id, sender_id").in_("team_id", team_ids).execute()
+        rows = resp.data or []
+        for r in rows:
+            tid = r.get("team_id")
+            sid = r.get("sender_id")
+            if not tid or not sid:
+                continue
+            team_map = result.get(tid) or {}
+            team_map[sid] = team_map.get(sid, 0) + 1
+            result[tid] = team_map
+    except Exception as e:
+        print(f"Error fetching message counts: {e}")
+    return result
+
+
+def compute_collaboration_balance_for_teams(team_ids: list) -> dict:
+    """
+    Returns a mapping team_id -> gini_coefficient (float 0..1)
+    """
+    balances = {}
+    if not team_ids:
+        return balances
+    counts_map = get_team_message_counts(team_ids)
+    for tid in team_ids:
+        sender_counts = counts_map.get(tid, {})
+        counts = list(sender_counts.values())
+        # If there are no messages, treat as balanced (0)
+        gini = compute_gini_from_counts(counts) if counts else 0.0
+        balances[tid] = gini
+    return balances
+
 def reset_matches():
     """
     Clears all team assignments:
