@@ -8,6 +8,10 @@ interface TeamFeedbackAverage {
   name: string;
   average: number;
   count: number;
+  total_reading_seconds?: number;
+  avg_reading_seconds_per_submission?: number;
+  coach_total_seconds?: number;
+  coach_samples?: number;
 }
 
 interface FeedbackAnalyticsPanelProps {
@@ -19,22 +23,32 @@ export function FeedbackAnalyticsPanel({ classId }: FeedbackAnalyticsPanelProps)
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [collabMap, setCollabMap] = useState<Map<string, number>>(new Map());
+  const [ratingTimeMap, setRatingTimeMap] = useState<Map<number, { totalSeconds: number; count: number }>>(new Map());
 
   useEffect(() => {
     let isMounted = true;
-    const supabase = createStudentBrowserClient();
 
     async function loadAverages() {
       setIsLoading(true);
       setLoadError(null);
 
       try {
-        const [{ data: feedbackData, error: feedbackError }, { data: teamData, error: teamError }, { data: messageReadData, error: messageReadError }] = await Promise.all([
+        const supabase = createStudentBrowserClient();
+        // Bound the data fetch with a timeout to avoid leaving the UI stuck
+        const teamsRes = await supabase.from("teams").select("id, name").eq("class_id", classId);
+        const teamIds = teamsRes.data?.map((t: any) => t.id) || [];
+
+        const fetchPromise = Promise.all([
           supabase.from("feedback").select("team_id, overall_satisfaction, match_explanation_seconds").eq("class_id", classId),
-          supabase.from("teams").select("id, name").eq("class_id", classId),
+          teamsRes,
           // message_read_times stores seconds spent reading coach messages (one row per student/message)
-          supabase.from("message_read_times").select("team_id, seconds").in("team_id", (await supabase.from("teams").select("id").eq("class_id", classId)).data?.map((t: any) => t.id) || []),
+          supabase.from("message_read_times").select("team_id, seconds").in("team_id", teamIds),
         ]);
+
+        const timeout = new Promise((_, reject) => setTimeout(() => reject(new Error("Timeout fetching analytics (10s)")), 10000));
+
+        const res: any = await Promise.race([fetchPromise, timeout]);
+        const [{ data: feedbackData, error: feedbackError }, { data: teamData, error: teamError }, { data: messageReadData, error: messageReadError }] = res;
 
         if (feedbackError) {
           throw new Error(feedbackError.message);
@@ -58,8 +72,10 @@ export function FeedbackAnalyticsPanel({ classId }: FeedbackAnalyticsPanelProps)
               }
             });
             if (isMounted) setCollabMap(map);
+          } else {
+            // non-OK response; leave collabMap unchanged
           }
-        } catch (err) {
+        } catch (err: any) {
           console.warn("Could not fetch collaboration balances:", err);
         }
         const grouped = new Map<string, { total: number; count: number }>();
@@ -83,12 +99,12 @@ export function FeedbackAnalyticsPanel({ classId }: FeedbackAnalyticsPanelProps)
 
         const averages = Array.from(grouped.entries()).map(([teamId, stats]) => ({
           team_id: teamId,
-          name: teamMap.get(teamId) ?? "Unknown team",
+          name: String(teamMap.get(teamId) ?? "Unknown team"),
           average: stats.count > 0 ? stats.total / stats.count : 0,
           count: stats.count,
           total_reading_seconds: 0,
           avg_reading_seconds_per_submission: 0,
-        }));
+        } as TeamFeedbackAverage));
 
         // compute team-level total reading time for match explanation from feedback.match_explanation_seconds
         const readingByTeam = new Map<string, { total: number; count: number }>();
@@ -130,8 +146,9 @@ export function FeedbackAnalyticsPanel({ classId }: FeedbackAnalyticsPanelProps)
           setRatingTimeMap(new Map(ratingTime));
         }
       } catch (error: any) {
+        console.error("FeedbackAnalyticsPanel.loadAverages error:", error);
         if (isMounted) {
-          setLoadError(error.message || "Unable to load feedback analytics.");
+          setLoadError((error && (error.message || String(error))) || "Unable to load feedback analytics.");
         }
       } finally {
         if (isMounted) {
@@ -184,62 +201,69 @@ export function FeedbackAnalyticsPanel({ classId }: FeedbackAnalyticsPanelProps)
         <div className="mt-6 space-y-4">
           {averages.map((team) => {
             const percentage = Math.round((team.average / 5) * 100);
-            const meterColor =
-              team.average >= 4 ? "bg-emerald-500" : team.average >= 3 ? "bg-amber-500" : "bg-rose-500";
+            const meterColor = team.average >= 4 ? "bg-emerald-500" : team.average >= 3 ? "bg-amber-500" : "bg-rose-500";
 
             return (
               <div key={team.team_id} className="rounded-3xl border border-black/5 bg-white p-4 shadow-sm dark:border-white/10 dark:bg-zinc-950">
-                <div className="flex items-center justify-between gap-4">
-                  <div className="flex items-center gap-3">
-                    <div>
-                      <p className="font-semibold text-foreground">{team.name}</p>
-                      <p className="text-xs text-muted">{team.count} feedback submission{team.count === 1 ? "" : "s"}</p>
-                    </div>
-                    {(() => {
-                      const val = collabMap.get(team.team_id);
-                      if (typeof val !== "number") {
-                        return (
-                          <div className="flex items-center gap-2 rounded-full bg-black/2 px-2 py-1 text-xs text-muted dark:bg-white/5">
-                            <span className={`h-2.5 w-2.5 rounded-full bg-neutral-300 dark:bg-neutral-600`} />
-                            <span className="whitespace-nowrap">Collab —</span>
-                          </div>
-                        );
-                      }
-                      const color = val <= 0.33 ? "bg-emerald-500" : val <= 0.66 ? "bg-amber-500" : "bg-rose-500";
+                <div className="flex items-start justify-between gap-4">
+                  <div>
+                    <p className="font-semibold text-foreground">{team.name}</p>
+                    <p className="text-xs text-muted">{team.count} feedback submission{team.count === 1 ? "" : "s"}</p>
+                  </div>
+                  {(() => {
+                    const val = collabMap.get(team.team_id);
+                    if (typeof val !== "number") {
                       return (
-                        <div
-                          role="img"
-                          aria-label={`Collaboration balance ${val.toFixed(2)}`}
-                          title={`Collaboration balance ${val.toFixed(2)}`}
-                          className="flex items-center gap-2 rounded-full bg-black/5 px-2 py-1 text-xs font-semibold text-foreground dark:bg-white/10"
-                        >
-                          <span className={`h-2.5 w-2.5 rounded-full ${color}`} />
-                          <span className="whitespace-nowrap">Collab {val.toFixed(2)}</span>
+                        <div className="flex items-center gap-2 rounded-full bg-black/2 px-2 py-1 text-xs text-muted dark:bg-white/5">
+                          <span className={`h-2.5 w-2.5 rounded-full bg-neutral-300 dark:bg-neutral-600`} />
+                          <span className="whitespace-nowrap">Collab —</span>
                         </div>
                       );
-                    })()}
-                  </div>
+                    }
+                    const color = val <= 0.33 ? "bg-emerald-500" : val <= 0.66 ? "bg-amber-500" : "bg-rose-500";
+                    return (
+                      <div
+                        role="img"
+                        aria-label={`Collaboration balance ${val.toFixed(2)}`}
+                        title={`Collaboration balance ${val.toFixed(2)}`}
+                        className="flex items-center gap-2 rounded-full bg-black/5 px-2 py-1 text-xs font-semibold text-foreground dark:bg-white/10"
+                      >
+                        <span className={`h-2.5 w-2.5 rounded-full ${color}`} />
+                        <span className="whitespace-nowrap">Collab {val.toFixed(2)}</span>
+                      </div>
+                    );
+                  })()}
+                </div>
 
-                  <div className="mt-3 h-2.5 overflow-hidden rounded-full bg-black/10 dark:bg-white/10">
-                    <div className={`${meterColor} h-full rounded-full transition-all duration-300`} style={{ width: `${percentage}%` }} />
+                <div className="mt-3">
+                  <div className="flex items-center justify-between mb-2">
+                    <div className="text-xs text-muted">Average score</div>
+                    <div className="text-sm font-semibold text-foreground">{Number(team.average).toFixed(1)} / 5</div>
                   </div>
-
-                  <div className="mt-3 flex flex-col gap-2 text-xs text-muted sm:flex-row sm:justify-between">
-                    <div>
-                      <div className="text-foreground text-xs font-medium">Reads total</div>
-                      <div>{(team as any).total_reading_seconds ?? 0}s</div>
-                    </div>
-                    <div>
-                      <div className="text-foreground text-xs font-medium">Avg / submission</div>
-                      <div>{(team as any).avg_reading_seconds_per_submission ?? 0}s</div>
-                    </div>
-                    <div>
-                      <div className="text-foreground text-xs font-medium">Coach reads</div>
-                      <div>{(team as any).coach_total_seconds ?? 0}s ({(team as any).coach_samples ?? 0})</div>
-                    </div>
+                  <div className="w-full overflow-hidden rounded-full bg-black/10 dark:bg-white/10 h-4">
+                    <div
+                      className={`${meterColor} h-full rounded-full transition-all duration-300`}
+                      style={{ width: `${percentage}%` }}
+                    />
                   </div>
                 </div>
-              );
+
+                <div className="mt-4 flex flex-col gap-2 text-xs text-muted sm:flex-row sm:justify-between">
+                  <div>
+                    <div className="text-foreground text-xs font-medium">Reads total</div>
+                    <div>{(team as any).total_reading_seconds ?? 0}s</div>
+                  </div>
+                  <div>
+                    <div className="text-foreground text-xs font-medium">Avg / submission</div>
+                    <div>{(team as any).avg_reading_seconds_per_submission ?? 0}s</div>
+                  </div>
+                  <div>
+                    <div className="text-foreground text-xs font-medium">Coach reads</div>
+                    <div>{(team as any).coach_total_seconds ?? 0}s ({(team as any).coach_samples ?? 0})</div>
+                  </div>
+                </div>
+              </div>
+            );
           })}
         </div>
         <div className="mt-6">

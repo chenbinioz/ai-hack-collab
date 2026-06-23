@@ -20,3 +20,5 @@ INFO:     127.0.0.1:64686 - "GET /educator-data HTTP/1.1" 200 OK
 INFO:     127.0.0.1:64690 - "GET /educator-data HTTP/1.1" 200 OK
 INFO:     127.0.0.1:64922 - "GET /educator-data HTTP/1.1" 200 OK
 INFO:     127.0.0.1:64927 - "GET /educator-data HTTP/1.1" 200 OK
+INFO:     127.0.0.1:65104 - "GET /educator-data HTTP/1.1" 200 OK
+INFO:     127.0.0.1:65108 - "GET /educator-data HTTP/1.1" 200 OK
