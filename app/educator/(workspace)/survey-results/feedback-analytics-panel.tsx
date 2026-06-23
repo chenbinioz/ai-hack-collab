@@ -18,6 +18,7 @@ export function FeedbackAnalyticsPanel({ classId }: FeedbackAnalyticsPanelProps)
   const [averages, setAverages] = useState<TeamFeedbackAverage[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [collabMap, setCollabMap] = useState<Map<string, number>>(new Map());
   const [ratingTimeMap, setRatingTimeMap] = useState<Map<number, { totalSeconds: number; count: number }>>(new Map());
 
   useEffect(() => {
@@ -44,6 +45,25 @@ export function FeedbackAnalyticsPanel({ classId }: FeedbackAnalyticsPanelProps)
         }
 
         const teamMap = new Map(teamData?.map((team: any) => [team.id, team.name]));
+        // Try to fetch collaboration balances from the backend service (FastAPI)
+        try {
+          const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+          const res = await fetch(`${apiUrl}/educator-data`);
+          if (res.ok) {
+            const json = await res.json();
+            const teamsFromApi = json.teams || [];
+            const map = new Map<string, number>();
+            teamsFromApi.forEach((t: any) => {
+              if (t.id && typeof t.collaboration_balance === "number") {
+                map.set(t.id, t.collaboration_balance);
+              }
+            });
+            if (isMounted) setCollabMap(map);
+          }
+        } catch (err) {
+          // Non-fatal: ignore
+          console.warn("Could not fetch collaboration balances from backend:", err);
+        }
         const grouped = new Map<string, { total: number; count: number }>();
         const ratingTime = new Map<number, { totalSeconds: number; count: number }>();
 
@@ -169,31 +189,58 @@ export function FeedbackAnalyticsPanel({ classId }: FeedbackAnalyticsPanelProps)
             const meterColor =
               team.average >= 4 ? "bg-emerald-500" : team.average >= 3 ? "bg-amber-500" : "bg-rose-500";
 
-            return (
-              <div key={team.team_id} className="rounded-3xl border border-black/5 bg-white p-4 shadow-sm dark:border-white/10 dark:bg-zinc-950">
-                <div className="flex items-center justify-between gap-4">
-                  <div>
-                    <p className="font-semibold text-foreground">{team.name}</p>
-                    <p className="text-xs text-muted">{team.count} feedback submission{team.count === 1 ? "" : "s"}</p>
+              return (
+                <div
+                  key={team.team_id}
+                  className="rounded-3xl border border-black/5 bg-white p-4 shadow-sm transition hover:shadow-md dark:border-white/10 dark:bg-zinc-950"
+                >
+                  <div className="flex items-center justify-between gap-4">
+                    <div>
+                      <p className="font-semibold text-foreground">{team.name}</p>
+                      <p className="text-xs text-muted">{team.count} feedback submission{team.count === 1 ? "" : "s"}</p>
+                    </div>
+
+                    <div className="flex items-center gap-3">
+                      {/* Collaboration balance badge from backend (Gini) */}
+                      {(() => {
+                        const val = collabMap.get(team.team_id);
+                        if (typeof val !== "number") return null;
+                        const color = val <= 0.33 ? "bg-emerald-500" : val <= 0.66 ? "bg-amber-500" : "bg-rose-500";
+                        return (
+                          <div title={`Collaboration balance ${val.toFixed(2)}`} className="flex items-center gap-2 rounded-full bg-black/5 px-2 py-1 text-xs font-semibold text-foreground dark:bg-white/10">
+                            <span className={`h-2.5 w-2.5 rounded-full ${color}`} />
+                            <span className="whitespace-nowrap">Collab {val.toFixed(2)}</span>
+                          </div>
+                        );
+                      })()}
+
+                      <div className="flex items-center gap-2 rounded-full bg-black/5 px-3 py-1 text-xs font-semibold text-foreground dark:bg-white/10">
+                        <span className={"h-2.5 w-2.5 rounded-full " + meterColor} />
+                        {team.average.toFixed(1)}/5
+                      </div>
+                    </div>
                   </div>
-                  <div className="flex items-center gap-2 rounded-full bg-black/5 px-3 py-1 text-xs font-semibold text-foreground dark:bg-white/10">
-                    <span className={"h-2.5 w-2.5 rounded-full " + meterColor} />
-                    {team.average.toFixed(1)}/5
+
+                  <div className="mt-3 h-2.5 overflow-hidden rounded-full bg-black/10 dark:bg-white/10">
+                    <div className={`${meterColor} h-full rounded-full transition-all duration-300`} style={{ width: `${percentage}%` }} />
+                  </div>
+
+                  <div className="mt-3 flex flex-col gap-2 text-xs text-muted sm:flex-row sm:justify-between">
+                    <div>
+                      <div className="text-foreground text-xs font-medium">Reads total</div>
+                      <div>{(team as any).total_reading_seconds ?? 0}s</div>
+                    </div>
+                    <div>
+                      <div className="text-foreground text-xs font-medium">Avg / submission</div>
+                      <div>{(team as any).avg_reading_seconds_per_submission ?? 0}s</div>
+                    </div>
+                    <div>
+                      <div className="text-foreground text-xs font-medium">Coach reads</div>
+                      <div>{(team as any).coach_total_seconds ?? 0}s ({(team as any).coach_samples ?? 0})</div>
+                    </div>
                   </div>
                 </div>
-                <div className="mt-3 h-2.5 overflow-hidden rounded-full bg-black/10 dark:bg-white/10">
-                  <div
-                    className={`${meterColor} h-full rounded-full transition-all duration-300`}
-                    style={{ width: `${percentage}%` }}
-                  />
-                </div>
-                <div className="mt-3 grid grid-cols-3 gap-2 text-xs text-muted">
-                  <div>Reads total: {(team as any).total_reading_seconds ?? 0}s</div>
-                  <div>Reads avg/submission: {(team as any).avg_reading_seconds_per_submission ?? 0}s</div>
-                  <div>Coach reads: {(team as any).coach_total_seconds ?? 0}s ({(team as any).coach_samples ?? 0})</div>
-                </div>
-              </div>
-            );
+              );
           })}
         </div>
         <div className="mt-6">
