@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { createStudentBrowserClient } from "@/lib/supabase/student-browser-client";
 import { TeamMessaging } from "./team-messaging";
 import { FeedbackModal } from "./feedback-modal";
@@ -33,6 +33,8 @@ export function TeamHub({ classId }: TeamHubProps = {}) {
   const [error, setError] = useState<string | null>(null);
   const [showFeedbackModal, setShowFeedbackModal] = useState(false);
   const [hasSubmittedFeedback, setHasSubmittedFeedback] = useState(false);
+  const reasonRef = useRef<HTMLDivElement | null>(null);
+  const [readingTimeSeconds, setReadingTimeSeconds] = useState<number | null>(null);
 
   const supabase = createStudentBrowserClient();
 
@@ -160,6 +162,9 @@ export function TeamHub({ classId }: TeamHubProps = {}) {
     void fetchTeamData();
   }, [fetchTeamData]);
 
+  // attach the visibility timer for the match explanation element
+  useMatchExplanationTimer(reasonRef, setReadingTimeSeconds);
+
   if (isLoading) {
     return (
       <section className="mt-10 rounded-2xl border border-black/10 bg-surface p-6 shadow-sm dark:border-white/10 sm:p-8">
@@ -235,7 +240,9 @@ export function TeamHub({ classId }: TeamHubProps = {}) {
             {/* Team Info */}
             <div className="rounded-lg border border-black/5 bg-white p-4 dark:border-white/10 dark:bg-zinc-900">
               <h3 className="text-lg font-semibold text-foreground">{team.name}</h3>
-              <p className="mt-2 text-sm text-muted">{team.reason}</p>
+              <div ref={reasonRef} className="mt-2 text-sm text-muted" aria-label="match-explanation">
+                {team.reason}
+              </div>
             </div>
 
             {/* Teammates */}
@@ -312,14 +319,15 @@ export function TeamHub({ classId }: TeamHubProps = {}) {
       )}
 
       {/* Team Messaging - only show when team is assigned */}
-      {team && (
+          {team && (
         <>
           <FeedbackModal
             open={showFeedbackModal}
             teamName={team.name}
             teamId={team.id}
             classId={classId}
-            onClose={() => setShowFeedbackModal(false)}
+                readingTimeSeconds={readingTimeSeconds}
+                onClose={() => setShowFeedbackModal(false)}
             onSubmitted={() => setHasSubmittedFeedback(true)}
           />
           <TeamMessaging teamId={team.id} teamName={team.name} />
@@ -327,4 +335,41 @@ export function TeamHub({ classId }: TeamHubProps = {}) {
       )}
     </section>
   );
+}
+
+// Measure visibility time for the match explanation element
+function useMatchExplanationTimer(ref: React.RefObject<HTMLDivElement | null>, setReadingTimeSeconds: (v: number | null) => void) {
+  const startRef = useRef<number | null>(null);
+  useEffect(() => {
+    if (!ref.current) return;
+
+    let accumulated = 0;
+    const node = ref.current;
+
+    const onIntersect: IntersectionObserverCallback = (entries) => {
+      entries.forEach((entry) => {
+        if (entry.isIntersecting) {
+          startRef.current = Date.now();
+        } else {
+          if (startRef.current) {
+            accumulated += Date.now() - startRef.current;
+            startRef.current = null;
+            setReadingTimeSeconds(Math.round(accumulated / 1000));
+          }
+        }
+      });
+    };
+
+    const observer = new IntersectionObserver(onIntersect, { threshold: 0.5 });
+    observer.observe(node);
+
+    return () => {
+      observer.disconnect();
+      if (startRef.current) {
+        accumulated += Date.now() - startRef.current;
+        startRef.current = null;
+      }
+      setReadingTimeSeconds(Math.round(accumulated / 1000));
+    };
+  }, [ref, setReadingTimeSeconds]);
 }

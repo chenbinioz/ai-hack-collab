@@ -8,13 +8,14 @@ interface FeedbackModalProps {
   teamName: string;
   teamId: string;
   classId?: string;
+  readingTimeSeconds?: number | null;
   onClose: () => void;
   onSubmitted: () => void;
 }
 
 const RATINGS = [1, 2, 3, 4, 5] as const;
 
-export function FeedbackModal({ open, teamName, teamId, classId, onClose, onSubmitted }: FeedbackModalProps) {
+export function FeedbackModal({ open, teamName, teamId, classId, readingTimeSeconds, onClose, onSubmitted }: FeedbackModalProps) {
   const [skillMatch, setSkillMatch] = useState<number | null>(null);
   const [styleMatch, setStyleMatch] = useState<number | null>(null);
   const [overallSatisfaction, setOverallSatisfaction] = useState<number | null>(null);
@@ -67,6 +68,7 @@ export function FeedbackModal({ open, teamName, teamId, classId, onClose, onSubm
       skill_match: skillMatch,
       style_match: styleMatch,
       overall_satisfaction: overallSatisfaction,
+      match_explanation_seconds: (readingTimeSeconds ?? null),
     };
 
     const { error } = await supabase.from("feedback").insert(payload);
