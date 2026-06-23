@@ -1,0 +1,22 @@
+INFO:     Will watch for changes in these directories: ['/Users/chenbozhang/ai-hack-collab/backend']
+INFO:     Uvicorn running on http://127.0.0.1:8000 (Press CTRL+C to quit)
+INFO:     Started reloader process [75194] using StatReload
+/Users/chenbozhang/ai-hack-collab/.venv/lib/python3.9/site-packages/urllib3/__init__.py:35: NotOpenSSLWarning: urllib3 v2 only supports OpenSSL 1.1.1+, currently the 'ssl' module is compiled with 'LibreSSL 2.8.3'. See: https://github.com/urllib3/urllib3/issues/3020
+  warnings.warn(
+INFO:     Started server process [75197]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     127.0.0.1:64478 - "GET /educator-data HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64522 - "GET /docs HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64522 - "GET /openapi.json HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64556 - "GET /educator-data HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64559 - "GET /educator-data HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64610 - "GET /educator-data HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64610 - "GET /educator-data HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64630 - "GET /educator-data HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64649 - "GET /educator-data HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64653 - "GET /educator-data HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64686 - "GET /educator-data HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64690 - "GET /educator-data HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64922 - "GET /educator-data HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64927 - "GET /educator-data HTTP/1.1" 200 OK
