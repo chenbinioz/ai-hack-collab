@@ -18,6 +18,7 @@ export function FeedbackAnalyticsPanel({ classId }: FeedbackAnalyticsPanelProps)
   const [averages, setAverages] = useState<TeamFeedbackAverage[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [collabMap, setCollabMap] = useState<Map<string, number>>(new Map());
 
   useEffect(() => {
     let isMounted = true;
@@ -41,6 +42,24 @@ export function FeedbackAnalyticsPanel({ classId }: FeedbackAnalyticsPanelProps)
         }
 
         const teamMap = new Map(teamData?.map((team: any) => [team.id, team.name]));
+        // Fetch collaboration balances from backend educator-data
+        try {
+          const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+          const res = await fetch(`${apiUrl}/educator-data`);
+          if (res.ok) {
+            const json = await res.json();
+            const teamsFromApi = json.teams || [];
+            const map = new Map<string, number>();
+            teamsFromApi.forEach((t: any) => {
+              if (t.id && typeof t.collaboration_balance === "number") {
+                map.set(t.id, t.collaboration_balance);
+              }
+            });
+            if (isMounted) setCollabMap(map);
+          }
+        } catch (err) {
+          console.warn("Could not fetch collaboration balances:", err);
+        }
         const grouped = new Map<string, { total: number; count: number }>();
 
         feedbackData?.forEach((entry: any) => {
@@ -122,9 +141,34 @@ export function FeedbackAnalyticsPanel({ classId }: FeedbackAnalyticsPanelProps)
             return (
               <div key={team.team_id} className="rounded-3xl border border-black/5 bg-white p-4 shadow-sm dark:border-white/10 dark:bg-zinc-950">
                 <div className="flex items-center justify-between gap-4">
-                  <div>
-                    <p className="font-semibold text-foreground">{team.name}</p>
-                    <p className="text-xs text-muted">{team.count} feedback submission{team.count === 1 ? "" : "s"}</p>
+                  <div className="flex items-center gap-3">
+                    <div>
+                      <p className="font-semibold text-foreground">{team.name}</p>
+                      <p className="text-xs text-muted">{team.count} feedback submission{team.count === 1 ? "" : "s"}</p>
+                    </div>
+                    {(() => {
+                      const val = collabMap.get(team.team_id);
+                      if (typeof val !== "number") {
+                        return (
+                          <div className="flex items-center gap-2 rounded-full bg-black/2 px-2 py-1 text-xs text-muted dark:bg-white/5">
+                            <span className={`h-2.5 w-2.5 rounded-full bg-neutral-300 dark:bg-neutral-600`} />
+                            <span className="whitespace-nowrap">Collab —</span>
+                          </div>
+                        );
+                      }
+                      const color = val <= 0.33 ? "bg-emerald-500" : val <= 0.66 ? "bg-amber-500" : "bg-rose-500";
+                      return (
+                        <div
+                          role="img"
+                          aria-label={`Collaboration balance ${val.toFixed(2)}`}
+                          title={`Collaboration balance ${val.toFixed(2)}`}
+                          className="flex items-center gap-2 rounded-full bg-black/5 px-2 py-1 text-xs font-semibold text-foreground dark:bg-white/10"
+                        >
+                          <span className={`h-2.5 w-2.5 rounded-full ${color}`} />
+                          <span className="whitespace-nowrap">Collab {val.toFixed(2)}</span>
+                        </div>
+                      );
+                    })()}
                   </div>
                   <div className="flex items-center gap-2 rounded-full bg-black/5 px-3 py-1 text-xs font-semibold text-foreground dark:bg-white/10">
                     <span className={"h-2.5 w-2.5 rounded-full " + meterColor} />
