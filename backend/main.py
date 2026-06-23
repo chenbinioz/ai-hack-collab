@@ -6,16 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from supabase import create_client
 
-from database import (
-    init_db,
-    save_student,
-    get_all_students,
-    get_all_teams,
-    save_teams,
-    reset_matches,
-    supabase,
-    compute_collaboration_balance_for_teams,
-)
+from database import init_db, save_student, get_all_students, get_all_teams, save_teams, reset_matches, supabase, compute_collaboration_balance_for_teams
 from matcher import match_students
 
 app = FastAPI()
@@ -99,6 +90,19 @@ def get_educator_data():
             "survey_name": student.get("survey_name"),
             "team_id": student.get("team_id")
         })
+
+    # Compute collaboration balance (Gini) per team and attach to team objects
+    try:
+        team_ids = [t.get("id") for t in teams if t.get("id")]
+        collab_map = compute_collaboration_balance_for_teams(team_ids) if team_ids else {}
+        for t in teams:
+            tid = t.get("id")
+            if not tid:
+                t["collaboration_balance"] = None
+            else:
+                t["collaboration_balance"] = collab_map.get(tid, 0.0)
+    except Exception as e:
+        print(f"Warning: failed to compute collaboration balance: {e}")
     
     # Compute collaboration balance (Gini) per team using message counts
     try:

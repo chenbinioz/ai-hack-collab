@@ -250,3 +250,75 @@ def reset_matches():
         print("Deleted all teams.")
     except Exception as e:
         print(f"Reset Error: {e}")
+
+
+def compute_gini_from_counts(counts: list) -> float:
+    """
+    Compute Gini coefficient for a list of non-negative counts.
+    Returns 0.0 for empty or all-zero lists.
+
+    Uses the efficient formula:
+      G = (2 * sum_{i=1..n} i * x_i) / (n * sum_x) - (n + 1) / n
+    where x_i are sorted in non-decreasing order.
+    """
+    try:
+        if not counts:
+            return 0.0
+        n = len(counts)
+        total = sum(counts)
+        if total <= 0 or n <= 1:
+            return 0.0
+
+        sorted_counts = sorted(counts)
+        numerator = 0
+        for i, x in enumerate(sorted_counts, start=1):
+            numerator += i * x
+
+        g = (2 * numerator) / (n * total) - (n + 1) / n
+        # Clamp and return as float
+        if g < 0:
+            return 0.0
+        if g > 1:
+            return 1.0
+        return float(g)
+    except Exception as e:
+        print(f"Error computing Gini: {e}")
+        return 0.0
+
+
+def compute_collaboration_balance_for_teams(team_ids: list) -> dict:
+    """
+    For each team_id in `team_ids`, compute the Gini coefficient of message counts
+    per sender within that team. Returns a mapping team_id -> gini_float.
+    """
+    if not supabase:
+        return {}
+    if not team_ids:
+        return {}
+
+    try:
+        # Fetch messages for these teams (team_id, sender_id)
+        resp = supabase.table("messages").select("team_id,sender_id").in_("team_id", team_ids).execute()
+        rows = resp.data or []
+
+        from collections import defaultdict
+        team_sender_counts = defaultdict(lambda: defaultdict(int))
+
+        for r in rows:
+            tid = r.get("team_id")
+            sid = r.get("sender_id")
+            if not tid or not sid:
+                continue
+            team_sender_counts[tid][sid] += 1
+
+        result = {}
+        for tid in team_ids:
+            sender_map = team_sender_counts.get(tid, {})
+            counts = list(sender_map.values())
+            # If no messages, treat as perfectly balanced (0.0)
+            result[tid] = compute_gini_from_counts(counts) if counts else 0.0
+
+        return result
+    except Exception as e:
+        print(f"Error computing collaboration balance: {e}")
+        return {}

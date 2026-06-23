@@ -19,7 +19,6 @@ export function FeedbackAnalyticsPanel({ classId }: FeedbackAnalyticsPanelProps)
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [collabMap, setCollabMap] = useState<Map<string, number>>(new Map());
-  const [ratingTimeMap, setRatingTimeMap] = useState<Map<number, { totalSeconds: number; count: number }>>(new Map());
 
   useEffect(() => {
     let isMounted = true;
@@ -45,7 +44,7 @@ export function FeedbackAnalyticsPanel({ classId }: FeedbackAnalyticsPanelProps)
         }
 
         const teamMap = new Map(teamData?.map((team: any) => [team.id, team.name]));
-        // Try to fetch collaboration balances from the backend service (FastAPI)
+        // Fetch collaboration balances from backend educator-data
         try {
           const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
           const res = await fetch(`${apiUrl}/educator-data`);
@@ -61,8 +60,7 @@ export function FeedbackAnalyticsPanel({ classId }: FeedbackAnalyticsPanelProps)
             if (isMounted) setCollabMap(map);
           }
         } catch (err) {
-          // Non-fatal: ignore
-          console.warn("Could not fetch collaboration balances from backend:", err);
+          console.warn("Could not fetch collaboration balances:", err);
         }
         const grouped = new Map<string, { total: number; count: number }>();
         const ratingTime = new Map<number, { totalSeconds: number; count: number }>();
@@ -189,36 +187,37 @@ export function FeedbackAnalyticsPanel({ classId }: FeedbackAnalyticsPanelProps)
             const meterColor =
               team.average >= 4 ? "bg-emerald-500" : team.average >= 3 ? "bg-amber-500" : "bg-rose-500";
 
-              return (
-                <div
-                  key={team.team_id}
-                  className="rounded-3xl border border-black/5 bg-white p-4 shadow-sm transition hover:shadow-md dark:border-white/10 dark:bg-zinc-950"
-                >
-                  <div className="flex items-center justify-between gap-4">
+            return (
+              <div key={team.team_id} className="rounded-3xl border border-black/5 bg-white p-4 shadow-sm dark:border-white/10 dark:bg-zinc-950">
+                <div className="flex items-center justify-between gap-4">
+                  <div className="flex items-center gap-3">
                     <div>
                       <p className="font-semibold text-foreground">{team.name}</p>
                       <p className="text-xs text-muted">{team.count} feedback submission{team.count === 1 ? "" : "s"}</p>
                     </div>
-
-                    <div className="flex items-center gap-3">
-                      {/* Collaboration balance badge from backend (Gini) */}
-                      {(() => {
-                        const val = collabMap.get(team.team_id);
-                        if (typeof val !== "number") return null;
-                        const color = val <= 0.33 ? "bg-emerald-500" : val <= 0.66 ? "bg-amber-500" : "bg-rose-500";
+                    {(() => {
+                      const val = collabMap.get(team.team_id);
+                      if (typeof val !== "number") {
                         return (
-                          <div title={`Collaboration balance ${val.toFixed(2)}`} className="flex items-center gap-2 rounded-full bg-black/5 px-2 py-1 text-xs font-semibold text-foreground dark:bg-white/10">
-                            <span className={`h-2.5 w-2.5 rounded-full ${color}`} />
-                            <span className="whitespace-nowrap">Collab {val.toFixed(2)}</span>
+                          <div className="flex items-center gap-2 rounded-full bg-black/2 px-2 py-1 text-xs text-muted dark:bg-white/5">
+                            <span className={`h-2.5 w-2.5 rounded-full bg-neutral-300 dark:bg-neutral-600`} />
+                            <span className="whitespace-nowrap">Collab —</span>
                           </div>
                         );
-                      })()}
-
-                      <div className="flex items-center gap-2 rounded-full bg-black/5 px-3 py-1 text-xs font-semibold text-foreground dark:bg-white/10">
-                        <span className={"h-2.5 w-2.5 rounded-full " + meterColor} />
-                        {team.average.toFixed(1)}/5
-                      </div>
-                    </div>
+                      }
+                      const color = val <= 0.33 ? "bg-emerald-500" : val <= 0.66 ? "bg-amber-500" : "bg-rose-500";
+                      return (
+                        <div
+                          role="img"
+                          aria-label={`Collaboration balance ${val.toFixed(2)}`}
+                          title={`Collaboration balance ${val.toFixed(2)}`}
+                          className="flex items-center gap-2 rounded-full bg-black/5 px-2 py-1 text-xs font-semibold text-foreground dark:bg-white/10"
+                        >
+                          <span className={`h-2.5 w-2.5 rounded-full ${color}`} />
+                          <span className="whitespace-nowrap">Collab {val.toFixed(2)}</span>
+                        </div>
+                      );
+                    })()}
                   </div>
 
                   <div className="mt-3 h-2.5 overflow-hidden rounded-full bg-black/10 dark:bg-white/10">
