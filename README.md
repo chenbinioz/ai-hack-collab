@@ -93,11 +93,15 @@ npm run dev
 3. View Team: Once the teacher triggers the match, your "Team Hub" will automatically update with your teammates' names and shared goals.
 
 **For Teachers**
-1. Monitor Cohort: View the list of students who have completed the survey under the "Teacher Dashboard."
+1. Manage Classes: Create classes to manage students, form groups and assign deadlines, View the list of students who have completed the survey under the "Teacher Dashboard."
 
-2. AI Matching: Navigate to the "Sort Groups" tab. Click "Generate AI Teams" to trigger the Gemini-2.5-Flash orchestration.
+2. AI Matching: Navigate to the "Sort Groups" tab. Choose matching criteria and click "Generate AI Teams" to trigger the Gemini-2.5-Flash orchestration.
 
 3. Review & Analytics: View the formed teams and monitor student satisfaction scores through the real-time feedback analytics.
+
+## Demo Video
+
+Link: https://www.youtube.com/watch?v=fv-j6s-_jes
 
 ## 📷 Screenshots
 
@@ -117,7 +121,7 @@ Additional competition documentation lives in `docs/`:
 - [Team coaching system](TEAM_COACHING_SYSTEM.md)
 
 ## 👥 Team Member Details and Contributions
-* **Chenbo Zhnag (Data Lead):** Designed the relational schema, SQL triggers for automated student/teacher routing, RLS security policies, and the data-locking mechanism.
+* **Chenbo Zhang (Data Lead):** Designed the relational schema, SQL triggers for automated student/teacher routing, RLS security policies, and the data-locking mechanism.
 
 * **Rob Jones (Frontend Lead):** Developed the Next.js UI, multi-page survey logic, and Supabase Auth integration.
 
