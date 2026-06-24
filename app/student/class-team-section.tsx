@@ -4,6 +4,8 @@ import { useState, useEffect } from "react";
 import { createStudentBrowserClient } from "@/lib/supabase/student-browser-client";
 import { TeamHub } from "@/components/team-hub";
 
+import { PostProjectSkillUpdateForm } from "./post-project-skill-update-form";
+
 interface ClassTeamSectionProps {
   classId: string;
   classInfo?: {
@@ -39,6 +41,7 @@ export function ClassTeamSection({ classId, classInfo: initialClassInfo = null }
   const [error, setError] = useState<string | null>(null);
   const [classInfo, setClassInfo] = useState<any>(initialClassInfo);
   const [countdownText, setCountdownText] = useState("No coursework deadline set");
+  const [deadlinePassed, setDeadlinePassed] = useState(false);
   const supabase = createStudentBrowserClient();
 
   useEffect(() => {
@@ -52,6 +55,12 @@ export function ClassTeamSection({ classId, classInfo: initialClassInfo = null }
   useEffect(() => {
     const tick = () => {
       setCountdownText(formatCountdown(classInfo?.coursework_deadline));
+      if (classInfo?.coursework_deadline) {
+        const target = new Date(classInfo.coursework_deadline).getTime();
+        setDeadlinePassed(!Number.isNaN(target) && target - Date.now() <= 0);
+      } else {
+        setDeadlinePassed(false);
+      }
     };
     tick();
     const interval = setInterval(tick, 1000);
@@ -161,6 +170,12 @@ export function ClassTeamSection({ classId, classInfo: initialClassInfo = null }
           <p className="mt-1 text-brand">{countdownText}</p>
         </div>
       </div>
+
+      {deadlinePassed && (
+        <div className="animate-in fade-in slide-in-from-bottom-2">
+          <PostProjectSkillUpdateForm classId={classId} />
+        </div>
+      )}
 
       <TeamHub classId={classId} />
     </section>
