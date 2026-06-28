@@ -7,9 +7,6 @@ interface ClassData {
   name: string;
   description: string;
   code: string;
-  coursework_deadline: string | null;
-  max_team_size: number;
-  ai_preferences: any;
   created_at: string;
   updated_at: string;
 }
@@ -49,14 +46,21 @@ export async function GET(request: NextRequest) {
     // Get enrollment counts for each class
     const classesWithCounts = await Promise.all(
       (classes || []).map(async (classItem: ClassData) => {
-        const { count } = await supabase
-          .from("class_enrollments")
-          .select("*", { count: "exact", head: true })
-          .eq("class_id", classItem.id);
+        const [{ count: studentCount }, { count: assignmentCount }] = await Promise.all([
+          supabase
+            .from("class_enrollments")
+            .select("*", { count: "exact", head: true })
+            .eq("class_id", classItem.id),
+          supabase
+            .from("assignments")
+            .select("*", { count: "exact", head: true })
+            .eq("class_id", classItem.id),
+        ]);
 
         return {
           ...classItem,
-          student_count: count || 0,
+          student_count: studentCount || 0,
+          assignment_count: assignmentCount || 0,
         };
       })
     );
@@ -79,16 +83,7 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json();
-    const { name, description, max_team_size, ai_preferences, coursework_deadline } = body;
-    let parsedDeadline: string | null = null;
-    if (coursework_deadline) {
-      const candidate = new Date(coursework_deadline);
-      if (Number.isNaN(candidate.getTime())) {
-        return NextResponse.json({ error: "Invalid coursework deadline" }, { status: 400 });
-      }
-      parsedDeadline = candidate.toISOString();
-    }
-
+    const { name, description } = body;
 
     if (!name || typeof name !== "string" || name.trim().length === 0) {
       return NextResponse.json({ error: "Class name is required" }, { status: 400 });
@@ -108,14 +103,6 @@ export async function POST(request: NextRequest) {
       name: name.trim(),
       description: description?.trim() || "",
       code: classCode,
-      coursework_deadline: parsedDeadline,
-      max_team_size: Math.max(2, Math.min(10, max_team_size || 3)),
-      ai_preferences: ai_preferences || {
-        focus_skills: true,
-        focus_working_style: true,
-        focus_availability: true,
-        balance_diversity: true,
-      },
     };
 
     const { data: newClass, error: createError } = await supabase

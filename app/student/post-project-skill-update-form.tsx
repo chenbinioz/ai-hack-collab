@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import { createStudentBrowserClient } from "@/lib/supabase/student-browser-client";
 
-export function PostProjectSkillUpdateForm({ classId }: { classId: string }) {
+export function PostProjectSkillUpdateForm({ assignmentId }: { assignmentId: string }) {
   const [values, setValues] = useState<any>({
     survey_confidence_coding: 3,
     survey_confidence_written_reports: 3,
@@ -17,8 +17,6 @@ export function PostProjectSkillUpdateForm({ classId }: { classId: string }) {
   const supabase = createStudentBrowserClient();
 
   const [submittedRow, setSubmittedRow] = useState<any | null>(null);
-
-  const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -35,9 +33,8 @@ export function PostProjectSkillUpdateForm({ classId }: { classId: string }) {
         return;
       }
 
-      // Use RPC so the client can submit without server service-role key
       const { data: rpcData, error: rpcError } = await supabase.rpc("rpc_submit_post_project_skill_update", {
-        p_class_id: classId,
+        p_assignment_id: assignmentId,
         p_survey_confidence_coding: values.survey_confidence_coding,
         p_survey_confidence_written_reports: values.survey_confidence_written_reports,
         p_survey_confidence_presentation_public_speaking: values.survey_confidence_presentation_public_speaking,
@@ -61,7 +58,6 @@ export function PostProjectSkillUpdateForm({ classId }: { classId: string }) {
     }
   }
 
-  // On mount: check for existing submission for this student + class
   useEffect(() => {
     let mounted = true;
     async function checkExisting() {
@@ -71,22 +67,21 @@ export function PostProjectSkillUpdateForm({ classId }: { classId: string }) {
         const token = session?.access_token;
         if (!token) return;
 
-            const { data, error } = await supabase
-              .from("post_project_skill_updates")
-              .select("*")
-              .eq("class_id", classId)
-              .limit(1);
+        const { data, error } = await supabase
+          .from("post_project_skill_updates")
+          .select("*")
+          .eq("assignment_id", assignmentId)
+          .limit(1);
 
-            if (error) {
-              // ignore; may be forbidden by RLS for client
-              return;
-            }
+        if (error) {
+          return;
+        }
 
-            if (mounted && data && data.length > 0) {
-              setSubmittedRow(data[0]);
-              setMessage("You have already submitted a post-project update for this class.");
-            }
-      } catch (err) {
+        if (mounted && data && data.length > 0) {
+          setSubmittedRow(data[0]);
+          setMessage("You have already submitted a post-project update for this assignment.");
+        }
+      } catch {
         // ignore errors
       }
     }
@@ -94,12 +89,12 @@ export function PostProjectSkillUpdateForm({ classId }: { classId: string }) {
     return () => {
       mounted = false;
     };
-  }, [classId, supabase]);
+  }, [assignmentId, supabase]);
 
   return (
     <form onSubmit={handleSubmit} className="space-y-4 rounded-xl border p-4 bg-surface">
       <h3 className="text-sm font-semibold">Post-project skill update</h3>
-      <p className="text-xs text-muted">If the coursework deadline has passed, you can update how confident you feel now (1–5).</p>
+      <p className="text-xs text-muted">After the assignment due date passes, you can update how confident you feel now (1–5).</p>
 
       {submittedRow ? (
         <div className="space-y-2">

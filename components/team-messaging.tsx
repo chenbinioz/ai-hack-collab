@@ -2,6 +2,9 @@
 
 import { useState, useEffect, useCallback, useRef } from "react";
 import { createStudentBrowserClient } from "@/lib/supabase/student-browser-client";
+import { CHAT_FILES_BUCKET, IMAGE_MIME_TYPES } from "@/lib/files/constants";
+import { getSignedDownloadUrl, uploadChatFile } from "@/lib/files/storage";
+import { formatFileSize, validateFile } from "@/lib/files/validation";
 
 interface Message {
   id: string;
@@ -10,6 +13,11 @@ interface Message {
   sender_name: string;
   content: string;
   created_at: string;
+  attachment_id: string | null;
+  file_name: string | null;
+  mime_type: string | null;
+  size_bytes: number | null;
+  storage_path: string | null;
 }
 
 interface TeamMessagingProps {
@@ -17,16 +25,103 @@ interface TeamMessagingProps {
   teamName: string;
 }
 
+function MessageAttachment({
+  message,
+  supabase,
+}: {
+  message: Message;
+  supabase: ReturnType<typeof createStudentBrowserClient>;
+}) {
+  const [downloadUrl, setDownloadUrl] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState(false);
+
+  useEffect(() => {
+    if (!message.storage_path || !message.attachment_id) return;
+
+    let cancelled = false;
+
+    void getSignedDownloadUrl(supabase, CHAT_FILES_BUCKET, message.storage_path)
+      .then((url) => {
+        if (!cancelled) setDownloadUrl(url);
+      })
+      .catch(() => {
+        if (!cancelled) setLoadError(true);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [message.storage_path, message.attachment_id, supabase]);
+
+  if (!message.attachment_id || !message.file_name) return null;
+
+  const isImage = message.mime_type && IMAGE_MIME_TYPES.has(message.mime_type);
+
+  if (loadError) {
+    return (
+      <p className="mt-2 text-xs text-muted">Could not load attachment</p>
+    );
+  }
+
+  if (!downloadUrl) {
+    return (
+      <p className="mt-2 text-xs text-muted">Loading attachment...</p>
+    );
+  }
+
+  if (isImage) {
+    return (
+      <div className="mt-2">
+        <a href={downloadUrl} target="_blank" rel="noopener noreferrer">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={downloadUrl}
+            alt={message.file_name}
+            className="max-h-48 rounded-lg border border-black/10 object-contain dark:border-white/10"
+          />
+        </a>
+        <p className="mt-1 text-xs text-muted">
+          {message.file_name}
+          {message.size_bytes ? ` · ${formatFileSize(message.size_bytes)}` : ""}
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <a
+      href={downloadUrl}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="mt-2 inline-flex items-center gap-2 rounded-lg border border-black/10 bg-background px-3 py-2 text-sm text-brand hover:bg-black/[0.02] dark:border-white/10 dark:hover:bg-white/[0.04]"
+    >
+      <svg className="h-4 w-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <path
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          strokeWidth={2}
+          d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
+        />
+      </svg>
+      <span className="truncate">{message.file_name}</span>
+      {message.size_bytes ? (
+        <span className="text-xs text-muted">({formatFileSize(message.size_bytes)})</span>
+      ) : null}
+    </a>
+  );
+}
+
 export function TeamMessaging({ teamId, teamName }: TeamMessagingProps) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [newMessage, setNewMessage] = useState("");
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const supabase = createStudentBrowserClient();
   const coachId = "00000000-0000-0000-0000-000000000001";
 
-  // Track per-message visibility timestamps and accumulated seconds
   const startTimesRef = useRef<Record<string, number>>({});
   const accumRef = useRef<Record<string, number>>({});
   const observedIdsRef = useRef<Set<string>>(new Set());
@@ -35,10 +130,11 @@ export function TeamMessaging({ teamId, teamName }: TeamMessagingProps) {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   };
 
-  // Fetch messages using the existing Security Definer RPC — no backend required
   const fetchMessages = useCallback(async (isInitialLoad = false) => {
     try {
-      const { data, error: rpcError } = await supabase.rpc("get_team_messages");
+      const { data, error: rpcError } = await supabase.rpc("get_team_messages", {
+        p_team_id: teamId,
+      });
 
       if (rpcError) {
         const msg =
@@ -51,45 +147,40 @@ export function TeamMessaging({ teamId, teamName }: TeamMessagingProps) {
 
       setMessages((data as Message[]) || []);
       setError(null);
-      
-      // If it's the first time we load, scroll to show latest messages
+
       if (isInitialLoad) {
-        // Use a small timeout to ensure DOM has rendered
         setTimeout(scrollToBottom, 100);
       }
     } catch (err: unknown) {
       console.error("Error fetching messages:", err);
       setError("Failed to load messages");
     }
-  }, [supabase]);
+  }, [supabase, teamId]);
 
-  // Poll for new messages every 5 seconds (simple real-time alternative)
   useEffect(() => {
-    void fetchMessages(true); // Treat first fetch as initial load
+    void fetchMessages(true);
     const interval = setInterval(() => {
-      void fetchMessages(false); // Background polls don't scroll
+      void fetchMessages(false);
     }, 5000);
     return () => clearInterval(interval);
   }, [teamId, fetchMessages]);
 
-  // Observe coach messages and measure how many seconds each student spends reading them.
   useEffect(() => {
     if (!messages || messages.length === 0) return;
 
-    const coachMessageElements: Element[] = Array.from(document.querySelectorAll('[data-coach-message="true"]')) as Element[];
+    const coachMessageElements: Element[] = Array.from(
+      document.querySelectorAll('[data-coach-message="true"]'),
+    ) as Element[];
 
-    // Create observer
     const observer = new IntersectionObserver((entries) => {
       entries.forEach((entry) => {
         const id = (entry.target as HTMLElement).dataset.messageId;
         if (!id) return;
 
         if (entry.isIntersecting) {
-          // start timing
           startTimesRef.current[id] = Date.now();
           observedIdsRef.current.add(id);
         } else {
-          // stop timing and add to accumulator
           const start = startTimesRef.current[id];
           if (start) {
             const delta = Math.round((Date.now() - start) / 1000);
@@ -100,10 +191,8 @@ export function TeamMessaging({ teamId, teamName }: TeamMessagingProps) {
       });
     }, { threshold: 0.5 });
 
-    // Observe current coach message elements
     coachMessageElements.forEach((el) => observer.observe(el));
 
-    // Flush accumulated read times to the DB when navigating away/unmounting
     const flush = async () => {
       try {
         const entries = Object.entries(accumRef.current).filter(([, seconds]) => seconds > 0);
@@ -120,12 +209,9 @@ export function TeamMessaging({ teamId, teamName }: TeamMessagingProps) {
           seconds,
         }));
 
-        // Insert reading times (RLS will verify team membership)
         await supabase.from("message_read_times").insert(inserts);
-        // Reset accumulators
         accumRef.current = {};
       } catch (err) {
-        // Non-fatal: logging only
         console.error("Failed to persist message read times:", err);
       }
     };
@@ -133,7 +219,6 @@ export function TeamMessaging({ teamId, teamName }: TeamMessagingProps) {
     window.addEventListener("beforeunload", flush);
     return () => {
       observer.disconnect();
-      // finalize any in-progress timers
       Object.entries(startTimesRef.current).forEach(([id, start]) => {
         accumRef.current[id] = (accumRef.current[id] ?? 0) + Math.round((Date.now() - start) / 1000);
       });
@@ -142,42 +227,67 @@ export function TeamMessaging({ teamId, teamName }: TeamMessagingProps) {
     };
   }, [messages, supabase, teamId]);
 
+  const handleFileSelect = (files: FileList | null) => {
+    if (!files || files.length === 0) return;
+    const file = files[0];
+    const validation = validateFile(file);
+    if (!validation.valid) {
+      setError(validation.error ?? "Invalid file");
+      return;
+    }
+    setSelectedFile(file);
+    setError(null);
+    if (fileInputRef.current) {
+      fileInputRef.current.value = "";
+    }
+  };
+
+  const canSend = newMessage.trim().length > 0 || selectedFile !== null;
 
   const sendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
 
     const trimmed = newMessage.trim();
-    if (!trimmed) return;
+    if (!trimmed && !selectedFile) return;
 
     setIsLoading(true);
     setError(null);
 
     try {
-      // Insert directly into the messages table.
-      // The RLS policy "Users can send messages to their team" enforces that:
-      //   - sender_id == auth.uid()
-      //   - team_id matches the user's own team
-      const { error: insertError } = await supabase.from("messages").insert({
-        team_id: teamId,
-        content: trimmed,
-        // sender_id is enforced server-side via RLS; we still pass it for clarity
-        sender_id: (await supabase.auth.getUser()).data.user?.id,
+      const messageId = crypto.randomUUID();
+      let storagePath: string | null = null;
+      let fileName: string | null = null;
+      let mimeType: string | null = null;
+      let sizeBytes: number | null = null;
+
+      if (selectedFile) {
+        storagePath = await uploadChatFile(supabase, teamId, messageId, selectedFile);
+        fileName = selectedFile.name;
+        mimeType = selectedFile.type;
+        sizeBytes = selectedFile.size;
+      }
+
+      const { error: rpcError } = await supabase.rpc("send_team_message", {
+        p_team_id: teamId,
+        p_content: trimmed,
+        p_message_id: messageId,
+        p_file_name: fileName,
+        p_mime_type: mimeType,
+        p_size_bytes: sizeBytes,
+        p_storage_path: storagePath,
       });
 
-      if (insertError) {
+      if (rpcError) {
         const msg =
-          typeof insertError === "object" &&
-          insertError !== null &&
-          "message" in insertError
-            ? String((insertError as { message: string }).message)
+          typeof rpcError === "object" && rpcError !== null && "message" in rpcError
+            ? String((rpcError as { message: string }).message)
             : "Failed to send message";
         throw new Error(msg);
       }
 
       setNewMessage("");
-      // Immediately refresh so the sender sees their own message
+      setSelectedFile(null);
       await fetchMessages(false);
-      // Always scroll to bottom after user sends a message
       setTimeout(scrollToBottom, 100);
     } catch (err: unknown) {
       console.error("Error sending message:", err);
@@ -208,7 +318,6 @@ export function TeamMessaging({ teamId, teamName }: TeamMessagingProps) {
         </div>
       )}
 
-      {/* Messages Container */}
       <div className="h-96 overflow-y-auto border border-black/10 rounded-lg p-4 mb-4 bg-background">
         {messages.length === 0 ? (
           <div className="flex items-center justify-center h-full text-muted">
@@ -231,9 +340,12 @@ export function TeamMessaging({ teamId, teamName }: TeamMessagingProps) {
                   data-message-id={message.id}
                   data-coach-message={message.sender_id === coachId ? "true" : "false"}
                 >
-                  <p className="text-sm text-foreground whitespace-pre-wrap">
-                    {message.content}
-                  </p>
+                  {message.content.trim() ? (
+                    <p className="text-sm text-foreground whitespace-pre-wrap">
+                      {message.content}
+                    </p>
+                  ) : null}
+                  <MessageAttachment message={message} supabase={supabase} />
                 </div>
               </div>
             ))}
@@ -242,8 +354,47 @@ export function TeamMessaging({ teamId, teamName }: TeamMessagingProps) {
         )}
       </div>
 
-      {/* Message Input */}
+      {selectedFile && (
+        <div className="mb-3 flex items-center justify-between gap-3 rounded-lg border border-black/10 bg-background px-3 py-2 text-sm dark:border-white/10">
+          <div className="min-w-0 flex-1">
+            <p className="truncate font-medium text-foreground">{selectedFile.name}</p>
+            <p className="text-xs text-muted">{formatFileSize(selectedFile.size)}</p>
+          </div>
+          <button
+            type="button"
+            onClick={() => setSelectedFile(null)}
+            className="text-xs text-red-600 hover:text-red-700 dark:text-red-400"
+          >
+            Remove
+          </button>
+        </div>
+      )}
+
       <form onSubmit={sendMessage} className="flex gap-3">
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept=".pdf,.doc,.docx,.ppt,.pptx,.xls,.xlsx,.png,.jpg,.jpeg,.gif,.webp,.txt,.csv"
+          className="hidden"
+          onChange={(e) => handleFileSelect(e.target.files)}
+          disabled={isLoading}
+        />
+        <button
+          type="button"
+          onClick={() => fileInputRef.current?.click()}
+          disabled={isLoading}
+          className="shrink-0 rounded-lg border border-black/10 bg-background px-3 py-2 text-foreground transition hover:bg-black/[0.03] disabled:opacity-50 dark:border-white/15 dark:hover:bg-white/[0.06]"
+          aria-label="Attach file"
+        >
+          <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={2}
+              d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13"
+            />
+          </svg>
+        </button>
         <input
           type="text"
           value={newMessage}
@@ -255,7 +406,7 @@ export function TeamMessaging({ teamId, teamName }: TeamMessagingProps) {
         />
         <button
           type="submit"
-          disabled={isLoading || !newMessage.trim()}
+          disabled={isLoading || !canSend}
           className="px-6 py-2 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
         >
           {isLoading ? "Sending..." : "Send"}
@@ -263,8 +414,7 @@ export function TeamMessaging({ teamId, teamName }: TeamMessagingProps) {
       </form>
 
       <p className="text-xs text-muted mt-2">
-        Messages are visible to all team members. Keep it professional and
-        collaborative!
+        Messages are visible to all team members. Attach one file per message (max 10 MB).
       </p>
     </section>
   );

@@ -17,7 +17,7 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "Cohort Connect — Smarter coursework groups",
   description:
-    "Form coursework groups by course fit, academic background, and how you learn together — not by appearance or stereotypes.",
+    "AI-assisted team matching and collaboration tools for coursework — fair groups, assignment briefs, team chat, and educator analytics.",
 };
 
 export default function RootLayout({

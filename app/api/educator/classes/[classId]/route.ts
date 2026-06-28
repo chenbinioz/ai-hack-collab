@@ -3,7 +3,7 @@ import { createClient } from "@/lib/supabase/server-client";
 
 export async function PATCH(
   request: NextRequest,
-  { params }: { params: Promise<{ classId: string }> }
+  { params }: { params: Promise<{ classId: string }> },
 ) {
   try {
     const supabase = await createClient();
@@ -15,28 +15,38 @@ export async function PATCH(
     }
 
     const body = await request.json();
-    const { coursework_deadline } = body;
+    const { name, description } = body;
 
-    let parsedDeadline: string | null = null;
-    if (coursework_deadline) {
-      const candidate = new Date(coursework_deadline);
-      if (Number.isNaN(candidate.getTime())) {
-        return NextResponse.json({ error: "Invalid coursework deadline" }, { status: 400 });
+    const updates: Record<string, unknown> = {};
+
+    if (name !== undefined) {
+      if (typeof name !== "string" || name.trim().length === 0) {
+        return NextResponse.json({ error: "Class name cannot be empty" }, { status: 400 });
       }
-      parsedDeadline = candidate.toISOString();
+      updates.name = name.trim();
     }
+
+    if (description !== undefined) {
+      updates.description = description?.trim() || "";
+    }
+
+    if (Object.keys(updates).length === 0) {
+      return NextResponse.json({ error: "No fields to update" }, { status: 400 });
+    }
+
+    updates.updated_at = new Date().toISOString();
 
     const { data: updatedClass, error: updateError } = await supabase
       .from("classes")
-      .update({ coursework_deadline: parsedDeadline })
+      .update(updates)
       .eq("id", classId)
       .eq("educator_id", user.id)
       .select("*")
       .single();
 
     if (updateError || !updatedClass) {
-      console.error("Error updating class deadline:", updateError);
-      return NextResponse.json({ error: "Failed to update class deadline" }, { status: 500 });
+      console.error("Error updating class:", updateError);
+      return NextResponse.json({ error: "Failed to update class" }, { status: 500 });
     }
 
     return NextResponse.json({ success: true, class: updatedClass });

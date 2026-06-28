@@ -262,7 +262,11 @@ def send_message(request: Request, message: dict):
 class ClassCreateRequest(BaseModel):
     name: str
     description: str = ""
-    coursework_deadline: Optional[str] = None
+
+class AssignmentCreateRequest(BaseModel):
+    title: str
+    description: str = ""
+    due_date: Optional[str] = None
     max_team_size: int = 3
     ai_preferences: dict = {
         "focus_skills": True,
@@ -270,6 +274,15 @@ class ClassCreateRequest(BaseModel):
         "focus_availability": True,
         "balance_diversity": True
     }
+    sort_order: int = 0
+
+class AssignmentUpdateRequest(BaseModel):
+    title: Optional[str] = None
+    description: Optional[str] = None
+    due_date: Optional[str] = None
+    max_team_size: Optional[int] = None
+    ai_preferences: Optional[dict] = None
+    sort_order: Optional[int] = None
 
 class JoinClassRequest(BaseModel):
     code: str
@@ -306,10 +319,7 @@ def create_class(request: Request, class_data: ClassCreateRequest):
             "educator_id": educator_id,
             "name": class_data.name,
             "description": class_data.description,
-            "coursework_deadline": class_data.coursework_deadline,
             "code": class_code,
-            "max_team_size": class_data.max_team_size,
-            "ai_preferences": class_data.ai_preferences
         }
 
         result = supabase.table("classes").insert(class_insert).execute()
@@ -502,7 +512,7 @@ def get_student_classes(request: Request):
             id,
             enrolled_at,
             role,
-            classes!inner(id, name, description, code, educator_id, max_team_size, ai_preferences)
+            classes!inner(id, name, description, code, educator_id)
         """).eq("student_id", student_id).execute()
 
         classes = []
@@ -516,8 +526,6 @@ def get_student_classes(request: Request):
                     "code": class_data["code"],
                     "enrolled_at": enrollment["enrolled_at"],
                     "role": enrollment["role"],
-                    "max_team_size": class_data["max_team_size"],
-                    "ai_preferences": class_data["ai_preferences"]
                 })
 
         return {"classes": classes}
@@ -526,14 +534,312 @@ def get_student_classes(request: Request):
         print(f"Error fetching student classes: {e}")
         return {"error": f"Failed to fetch classes: {str(e)}"}
 
-# ENDPOINT 14: Generate teams for a specific class
+# ============================================================================
+# ASSIGNMENT ENDPOINTS
+# ============================================================================
+
+def _get_authenticated_user_id(request: Request):
+    """Returns (user_id, error_response) — error_response is set on failure."""
+    auth_header = request.headers.get("Authorization")
+    if not auth_header or not auth_header.startswith("Bearer "):
+        return None, {"error": "Not authenticated"}
+
+    token = auth_header.replace("Bearer ", "")
+    temp_supabase = create_client(
+        os.getenv("SUPABASE_URL"),
+        os.getenv("SUPABASE_SERVICE_ROLE_KEY") or os.getenv("SUPABASE_ANON_KEY")
+    )
+
+    user_response = temp_supabase.auth.get_user(token)
+    if not user_response.user:
+        return None, {"error": "Invalid token"}
+
+    return str(user_response.user.id), None
+
+
+def _verify_educator_owns_class(educator_id: str, class_id: str):
+    """Returns (class_data, error_response) — error_response is set on failure."""
+    class_result = supabase.table("classes").select("*").eq("id", class_id).eq("educator_id", educator_id).execute()
+    if not class_result.data:
+        return None, {"error": "Class not found or access denied"}
+    return class_result.data[0], None
+
+
+def _verify_assignment_in_class(class_id: str, assignment_id: str):
+    """Returns (assignment_data, error_response) — error_response is set on failure."""
+    assignment_result = supabase.table("assignments").select("*").eq("id", assignment_id).eq("class_id", class_id).execute()
+    if not assignment_result.data:
+        return None, {"error": "Assignment not found"}
+    return assignment_result.data[0], None
+
+
+def _collect_valid_students_for_matching(admin_supabase, class_id: str):
+    """Returns (valid_students, error_response) for AI team generation."""
+    enrolled_students = admin_supabase.table("class_enrollments").select("""
+        student_id,
+        student_profiles!inner(
+            id,
+            survey_name,
+            profile_survey_completed_at,
+            survey_alevel_or_equivalent_titles,
+            survey_ancillary_module,
+            survey_confidence_coding,
+            survey_confidence_written_reports,
+            survey_confidence_presentation_public_speaking,
+            survey_confidence_mathematical_literacy,
+            survey_confidence_abstract_complex_content,
+            survey_confidence_conflict_resolution,
+            survey_approach_deadline,
+            survey_approach_discussion,
+            survey_approach_disagreement,
+            survey_approach_new_concepts,
+            survey_approach_communication,
+            survey_approach_teammate_work,
+            survey_approach_heavy_workload,
+            survey_approach_group_project_role,
+            survey_approach_critical_feedback
+        )
+    """).eq("class_id", class_id).execute()
+
+    if not enrolled_students.data:
+        return None, {"error": "No students enrolled in this class"}
+
+    valid_students = []
+    for enrollment in enrolled_students.data:
+        student = enrollment["student_profiles"]
+        if student.get("profile_survey_completed_at"):
+            valid_students.append({
+                "id": student["id"],
+                "survey_name": student.get("survey_name"),
+                "survey_alevel_or_equivalent_titles": student.get("survey_alevel_or_equivalent_titles"),
+                "survey_ancillary_module": student.get("survey_ancillary_module"),
+                "survey_confidence_coding": student.get("survey_confidence_coding"),
+                "survey_confidence_written_reports": student.get("survey_confidence_written_reports"),
+                "survey_confidence_presentation_public_speaking": student.get("survey_confidence_presentation_public_speaking"),
+                "survey_confidence_mathematical_literacy": student.get("survey_confidence_mathematical_literacy"),
+                "survey_confidence_abstract_complex_content": student.get("survey_confidence_abstract_complex_content"),
+                "survey_confidence_conflict_resolution": student.get("survey_confidence_conflict_resolution"),
+                "survey_approach_deadline": student.get("survey_approach_deadline"),
+                "survey_approach_discussion": student.get("survey_approach_discussion"),
+                "survey_approach_disagreement": student.get("survey_approach_disagreement"),
+                "survey_approach_new_concepts": student.get("survey_approach_new_concepts"),
+                "survey_approach_communication": student.get("survey_approach_communication"),
+                "survey_approach_teammate_work": student.get("survey_approach_teammate_work"),
+                "survey_approach_heavy_workload": student.get("survey_approach_heavy_workload"),
+                "survey_approach_group_project_role": student.get("survey_approach_group_project_role"),
+                "survey_approach_critical_feedback": student.get("survey_approach_critical_feedback"),
+            })
+
+    if len(valid_students) < 2:
+        return None, {"error": "Need at least 2 students with completed surveys to generate teams"}
+
+    required_fields = [
+        "survey_alevel_or_equivalent_titles",
+        "survey_ancillary_module",
+        "survey_confidence_coding",
+        "survey_confidence_written_reports",
+        "survey_confidence_presentation_public_speaking",
+        "survey_confidence_mathematical_literacy",
+        "survey_confidence_abstract_complex_content",
+        "survey_confidence_conflict_resolution",
+        "survey_approach_deadline",
+        "survey_approach_discussion",
+        "survey_approach_disagreement",
+        "survey_approach_new_concepts",
+        "survey_approach_communication",
+        "survey_approach_teammate_work",
+        "survey_approach_heavy_workload",
+        "survey_approach_group_project_role",
+        "survey_approach_critical_feedback",
+    ]
+
+    students_missing_fields = []
+    for student in valid_students:
+        missing = []
+        for field_name in required_fields:
+            value = student.get(field_name)
+            if value is None:
+                missing.append(field_name)
+                continue
+
+            if field_name == "survey_alevel_or_equivalent_titles":
+                if isinstance(value, list) and len(value) == 0:
+                    missing.append(field_name)
+                elif isinstance(value, str) and not value.strip():
+                    missing.append(field_name)
+
+            if isinstance(value, str) and not value.strip():
+                missing.append(field_name)
+
+        if missing:
+            students_missing_fields.append(
+                {
+                    "student_id": student.get("id"),
+                    "student_name": student.get("survey_name") or "Unnamed student",
+                    "missing_fields": sorted(list(set(missing))),
+                }
+            )
+
+    if students_missing_fields:
+        student_names = ", ".join(item["student_name"] for item in students_missing_fields)
+        return None, {
+            "error": (
+                "Cannot run AI matching because some required survey values are missing. "
+                "Please ask these students to complete the profile survey again: "
+                f"{student_names}."
+            ),
+            "students_requiring_resurvey": students_missing_fields,
+        }
+
+    return valid_students, None
+
+
+@app.get("/educator/classes/{class_id}/assignments")
+def list_class_assignments(class_id: str, request: Request):
+    if not supabase:
+        return {"error": "Database not configured"}
+
+    try:
+        educator_id, auth_error = _get_authenticated_user_id(request)
+        if auth_error:
+            return auth_error
+
+        _, class_error = _verify_educator_owns_class(educator_id, class_id)
+        if class_error:
+            return class_error
+
+        result = supabase.table("assignments").select("*").eq("class_id", class_id).order("sort_order").order("created_at").execute()
+        return {"assignments": result.data or []}
+
+    except Exception as e:
+        print(f"Error listing assignments: {e}")
+        return {"error": f"Failed to list assignments: {str(e)}"}
+
+
+@app.post("/educator/classes/{class_id}/assignments")
+def create_assignment(class_id: str, request: Request, assignment_data: AssignmentCreateRequest):
+    if not supabase:
+        return {"error": "Database not configured"}
+
+    try:
+        educator_id, auth_error = _get_authenticated_user_id(request)
+        if auth_error:
+            return auth_error
+
+        _, class_error = _verify_educator_owns_class(educator_id, class_id)
+        if class_error:
+            return class_error
+
+        assignment_insert = {
+            "class_id": class_id,
+            "title": assignment_data.title,
+            "description": assignment_data.description,
+            "due_date": assignment_data.due_date,
+            "max_team_size": assignment_data.max_team_size,
+            "ai_preferences": assignment_data.ai_preferences,
+            "sort_order": assignment_data.sort_order,
+            "created_by": educator_id,
+        }
+
+        result = supabase.table("assignments").insert(assignment_insert).execute()
+
+        if result.data:
+            return {"success": True, "assignment": result.data[0]}
+        return {"error": "Failed to create assignment"}
+
+    except Exception as e:
+        print(f"Error creating assignment: {e}")
+        return {"error": f"Failed to create assignment: {str(e)}"}
+
+
+@app.patch("/educator/classes/{class_id}/assignments/{assignment_id}")
+def update_assignment(class_id: str, assignment_id: str, request: Request, assignment_data: AssignmentUpdateRequest):
+    if not supabase:
+        return {"error": "Database not configured"}
+
+    try:
+        educator_id, auth_error = _get_authenticated_user_id(request)
+        if auth_error:
+            return auth_error
+
+        _, class_error = _verify_educator_owns_class(educator_id, class_id)
+        if class_error:
+            return class_error
+
+        _, assignment_error = _verify_assignment_in_class(class_id, assignment_id)
+        if assignment_error:
+            return assignment_error
+
+        updates = assignment_data.model_dump(exclude_unset=True)
+        if not updates:
+            return {"error": "No fields to update"}
+
+        result = supabase.table("assignments").update(updates).eq("id", assignment_id).execute()
+
+        if result.data:
+            return {"success": True, "assignment": result.data[0]}
+        return {"error": "Failed to update assignment"}
+
+    except Exception as e:
+        print(f"Error updating assignment: {e}")
+        return {"error": f"Failed to update assignment: {str(e)}"}
+
+
+@app.delete("/educator/classes/{class_id}/assignments/{assignment_id}")
+def delete_assignment(class_id: str, assignment_id: str, request: Request):
+    if not supabase:
+        return {"error": "Database not configured"}
+
+    try:
+        educator_id, auth_error = _get_authenticated_user_id(request)
+        if auth_error:
+            return auth_error
+
+        _, class_error = _verify_educator_owns_class(educator_id, class_id)
+        if class_error:
+            return class_error
+
+        _, assignment_error = _verify_assignment_in_class(class_id, assignment_id)
+        if assignment_error:
+            return assignment_error
+
+        supabase.table("assignments").delete().eq("id", assignment_id).execute()
+        return {"success": True, "message": "Assignment deleted"}
+
+    except Exception as e:
+        print(f"Error deleting assignment: {e}")
+        return {"error": f"Failed to delete assignment: {str(e)}"}
+
+
+@app.get("/student/classes/{class_id}/assignments")
+def get_student_class_assignments(class_id: str, request: Request):
+    if not supabase:
+        return {"error": "Database not configured"}
+
+    try:
+        student_id, auth_error = _get_authenticated_user_id(request)
+        if auth_error:
+            return auth_error
+
+        enrollment = supabase.table("class_enrollments").select("id").eq("class_id", class_id).eq("student_id", student_id).execute()
+        if not enrollment.data:
+            return {"error": "Not enrolled in this class"}
+
+        result = supabase.rpc("list_student_assignments", {"p_class_id": class_id}).execute()
+        return {"assignments": result.data or []}
+
+    except Exception as e:
+        print(f"Error fetching student assignments: {e}")
+        return {"error": f"Failed to fetch assignments: {str(e)}"}
+
+
+# ENDPOINT 14: Generate teams for a specific class (deprecated)
 # Call: POST /educator/classes/{class_id}/generate-teams
 @app.post("/educator/classes/{class_id}/generate-teams")
 def generate_class_teams(class_id: str, request: Request):
     try:
         supabase_url = os.getenv("SUPABASE_URL")
         service_role_key = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
-        anon_key = os.getenv("SUPABASE_ANON_KEY")
 
         if not supabase_url:
             return {"error": "Database not configured: SUPABASE_URL is missing"}
@@ -541,186 +847,126 @@ def generate_class_teams(class_id: str, request: Request):
         if not service_role_key:
             return {"error": "Backend misconfigured: SUPABASE_SERVICE_ROLE_KEY is required to generate teams"}
 
-        auth_header = request.headers.get("Authorization")
-        if not auth_header or not auth_header.startswith("Bearer "):
-            return {"error": "Not authenticated"}
+        educator_id, auth_error = _get_authenticated_user_id(request)
+        if auth_error:
+            return auth_error
 
-        token = auth_header.replace("Bearer ", "")
+        admin_supabase = create_client(supabase_url, service_role_key)
+        _, class_error = _verify_educator_owns_class(educator_id, class_id)
+        if class_error:
+            return class_error
 
-        # Use anon (or service key fallback) only for token validation.
-        auth_client = create_client(supabase_url, anon_key or service_role_key)
+        first_assignment = admin_supabase.table("assignments").select("id").eq(
+            "class_id", class_id
+        ).order("sort_order").order("created_at").limit(1).execute()
+
+        first_assignment_id = first_assignment.data[0]["id"] if first_assignment.data else None
+        redirect_endpoint = (
+            f"/educator/classes/{class_id}/assignments/{first_assignment_id}/generate-teams"
+            if first_assignment_id
+            else None
+        )
+
+        raise HTTPException(
+            status_code=410,
+            detail={
+                "error": (
+                    "Class-level team generation is deprecated. "
+                    "Use POST /educator/classes/{class_id}/assignments/{assignment_id}/generate-teams instead."
+                ),
+                "assignment_id": first_assignment_id,
+                "redirect_endpoint": redirect_endpoint,
+            },
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Error in deprecated generate teams: {e}")
+        return {"error": f"Failed to generate teams: {str(e)}"}
+
+
+# ENDPOINT 15: Generate teams for a specific assignment
+# Call: POST /educator/classes/{class_id}/assignments/{assignment_id}/generate-teams
+@app.post("/educator/classes/{class_id}/assignments/{assignment_id}/generate-teams")
+def generate_assignment_teams(class_id: str, assignment_id: str, request: Request):
+    try:
+        supabase_url = os.getenv("SUPABASE_URL")
+        service_role_key = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
+
+        if not supabase_url:
+            return {"error": "Database not configured: SUPABASE_URL is missing"}
+
+        if not service_role_key:
+            return {"error": "Backend misconfigured: SUPABASE_SERVICE_ROLE_KEY is required to generate teams"}
+
+        educator_id, auth_error = _get_authenticated_user_id(request)
+        if auth_error:
+            return auth_error
+
         admin_supabase = create_client(supabase_url, service_role_key)
 
-        user_response = auth_client.auth.get_user(token)
-        if not user_response.user:
-            return {"error": "Invalid token"}
+        class_data, class_error = _verify_educator_owns_class(educator_id, class_id)
+        if class_error:
+            return class_error
 
-        educator_id = str(user_response.user.id)
+        assignment_data, assignment_error = _verify_assignment_in_class(class_id, assignment_id)
+        if assignment_error:
+            return assignment_error
 
-        # Verify educator owns this class
-        class_result = admin_supabase.table("classes").select("*").eq("id", class_id).eq("educator_id", educator_id).execute()
+        valid_students, students_error = _collect_valid_students_for_matching(admin_supabase, class_id)
+        if students_error:
+            return students_error
 
-        if not class_result.data:
-            return {"error": "Class not found or access denied"}
-
-        class_data = class_result.data[0]
-
-        # Get enrolled students who have completed surveys
-        enrolled_students = admin_supabase.table("class_enrollments").select("""
-            student_id,
-            student_profiles!inner(
-                id,
-                survey_name,
-                profile_survey_completed_at,
-                survey_alevel_or_equivalent_titles,
-                survey_ancillary_module,
-                survey_confidence_coding,
-                survey_confidence_written_reports,
-                survey_confidence_presentation_public_speaking,
-                survey_confidence_mathematical_literacy,
-                survey_confidence_abstract_complex_content,
-                survey_confidence_conflict_resolution,
-                survey_approach_deadline,
-                survey_approach_discussion,
-                survey_approach_disagreement,
-                survey_approach_new_concepts,
-                survey_approach_communication,
-                survey_approach_teammate_work,
-                survey_approach_heavy_workload,
-                survey_approach_group_project_role,
-                survey_approach_critical_feedback
-            )
-        """).eq("class_id", class_id).execute()
-
-        if not enrolled_students.data:
-            return {"error": "No students enrolled in this class"}
-
-        # Filter to only students with completed surveys
-        valid_students = []
-        for enrollment in enrolled_students.data:
-            student = enrollment["student_profiles"]
-            if student.get("profile_survey_completed_at"):
-                valid_students.append({
-                    "id": student["id"],
-                    "survey_name": student.get("survey_name"),
-                    "survey_alevel_or_equivalent_titles": student.get("survey_alevel_or_equivalent_titles"),
-                    "survey_ancillary_module": student.get("survey_ancillary_module"),
-                    "survey_confidence_coding": student.get("survey_confidence_coding"),
-                    "survey_confidence_written_reports": student.get("survey_confidence_written_reports"),
-                    "survey_confidence_presentation_public_speaking": student.get("survey_confidence_presentation_public_speaking"),
-                    "survey_confidence_mathematical_literacy": student.get("survey_confidence_mathematical_literacy"),
-                    "survey_confidence_abstract_complex_content": student.get("survey_confidence_abstract_complex_content"),
-                    "survey_confidence_conflict_resolution": student.get("survey_confidence_conflict_resolution"),
-                    "survey_approach_deadline": student.get("survey_approach_deadline"),
-                    "survey_approach_discussion": student.get("survey_approach_discussion"),
-                    "survey_approach_disagreement": student.get("survey_approach_disagreement"),
-                    "survey_approach_new_concepts": student.get("survey_approach_new_concepts"),
-                    "survey_approach_communication": student.get("survey_approach_communication"),
-                    "survey_approach_teammate_work": student.get("survey_approach_teammate_work"),
-                    "survey_approach_heavy_workload": student.get("survey_approach_heavy_workload"),
-                    "survey_approach_group_project_role": student.get("survey_approach_group_project_role"),
-                    "survey_approach_critical_feedback": student.get("survey_approach_critical_feedback"),
-                })
-
-        if len(valid_students) < 2:
-            return {"error": "Need at least 2 students with completed surveys to generate teams"}
-
-        required_fields = [
-            "survey_alevel_or_equivalent_titles",
-            "survey_ancillary_module",
-            "survey_confidence_coding",
-            "survey_confidence_written_reports",
-            "survey_confidence_presentation_public_speaking",
-            "survey_confidence_mathematical_literacy",
-            "survey_confidence_abstract_complex_content",
-            "survey_confidence_conflict_resolution",
-            "survey_approach_deadline",
-            "survey_approach_discussion",
-            "survey_approach_disagreement",
-            "survey_approach_new_concepts",
-            "survey_approach_communication",
-            "survey_approach_teammate_work",
-            "survey_approach_heavy_workload",
-            "survey_approach_group_project_role",
-            "survey_approach_critical_feedback",
-        ]
-
-        students_missing_fields = []
-        for student in valid_students:
-            missing = []
-            for field_name in required_fields:
-                value = student.get(field_name)
-                if value is None:
-                    missing.append(field_name)
-                    continue
-
-                if field_name == "survey_alevel_or_equivalent_titles":
-                    if isinstance(value, list) and len(value) == 0:
-                        missing.append(field_name)
-                    elif isinstance(value, str) and not value.strip():
-                        missing.append(field_name)
-
-                if isinstance(value, str) and not value.strip():
-                    missing.append(field_name)
-
-            if missing:
-                students_missing_fields.append(
-                    {
-                        "student_id": student.get("id"),
-                        "student_name": student.get("survey_name") or "Unnamed student",
-                        "missing_fields": sorted(list(set(missing))),
-                    }
-                )
-
-        if students_missing_fields:
-            student_names = ", ".join(item["student_name"] for item in students_missing_fields)
-            return {
-                "error": (
-                    "Cannot run AI matching because some required survey values are missing. "
-                    "Please ask these students to complete the profile survey again: "
-                    f"{student_names}."
-                ),
-                "students_requiring_resurvey": students_missing_fields,
-            }
-
-        class_goal_hint = (class_data.get("description") or class_data.get("name") or "").strip()
+        assignment_goal_hint = (
+            assignment_data.get("description") or assignment_data.get("title") or class_data.get("name") or ""
+        ).strip()
         class_context = {
-            "coursework_deadline": class_data.get("coursework_deadline"),
-            "project_goal_hint": class_goal_hint,
-            "max_team_size": class_data.get("max_team_size", 3),
+            "coursework_deadline": assignment_data.get("due_date"),
+            "project_goal_hint": assignment_goal_hint,
+            "max_team_size": assignment_data.get("max_team_size", 3),
         }
 
-        # Generate teams using AI with class-specific preferences
-        matches = match_students(valid_students, class_data.get("ai_preferences", {}), class_context)
+        matches = match_students(
+            valid_students,
+            assignment_data.get("ai_preferences", {}),
+            class_context,
+        )
 
         if isinstance(matches, dict) and "error" in matches:
             return matches
 
-        # Regeneration should replace existing class teams, not append more.
-        existing_teams_result = admin_supabase.table("teams").select("id").eq("class_id", class_id).execute()
-        existing_team_ids = [team["id"] for team in (existing_teams_result.data or []) if team.get("id")]
+        existing_teams_result = admin_supabase.table("teams").select("id").eq(
+            "assignment_id", assignment_id
+        ).execute()
+        existing_team_ids = [
+            team["id"] for team in (existing_teams_result.data or []) if team.get("id")
+        ]
 
-        # We'll create new teams first, then remove the old teams to avoid briefly ungrouping students.
-
-        # Save teams with class_id
         if "groups" in matches:
             for group in matches["groups"]:
                 group["class_id"] = class_id
+                group["assignment_id"] = assignment_id
 
-        # Create new teams and get their IDs
-        created_team_ids = save_teams(matches, class_id, max_team_size=class_data.get("max_team_size", 3)) or []
+        created_team_ids = save_teams(
+            matches,
+            class_id,
+            max_team_size=assignment_data.get("max_team_size", 3),
+            assignment_id=assignment_id,
+        ) or []
 
-        # Now it's safe to delete old teams (they won't be referenced by students anymore)
         if existing_team_ids:
-            try:
-                admin_supabase.table("teams").delete().in_("id", existing_team_ids).execute()
-            except Exception as del_err:
-                print(f"Warning: Failed to delete old teams: {del_err}")
+            stale_team_ids = [tid for tid in existing_team_ids if tid not in created_team_ids]
+            if stale_team_ids:
+                try:
+                    admin_supabase.table("teams").delete().in_("id", stale_team_ids).execute()
+                except Exception as del_err:
+                    print(f"Warning: Failed to delete old teams: {del_err}")
 
-        return {"matches": matches, "class_id": class_id}
+        return {"matches": matches, "class_id": class_id, "assignment_id": assignment_id}
 
     except Exception as e:
-        print(f"Error generating teams: {e}")
+        print(f"Error generating assignment teams: {e}")
         return {"error": f"Failed to generate teams: {str(e)}"}
 
 # NOTE: get_current_user helper is unused after this messaging fix.
