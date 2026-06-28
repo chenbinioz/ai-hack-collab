@@ -39,16 +39,17 @@ def get_all_students():
         print(f"Supabase Select Error: {e}")
         return []
 
-def save_teams(matches_parsed, class_id=None, max_team_size=None):
+def save_teams(matches_parsed, class_id=None, max_team_size=None, assignment_id=None):
     """
     Takes parsed JSON containing groups, inserts a new 'teams' record,
-    and assigns 'team_id' on the matching member 'student_profiles'.
-    Now supports class-scoped teams.
+    and assigns members via team_members (when assignment_id is set) or
+    student_profiles.team_id (legacy global matching).
     
     Args:
         matches_parsed: Parsed JSON from AI matcher with groups
         class_id: Optional class ID to scope teams
         max_team_size: Optional max team size constraint for validation
+        assignment_id: Optional assignment ID for per-assignment team membership
     """
     if not supabase:
         print("Error: Supabase client is not initialized.")
@@ -102,6 +103,10 @@ def save_teams(matches_parsed, class_id=None, max_team_size=None):
         if group_class_id:
             team_insert["class_id"] = group_class_id
 
+        group_assignment_id = group.get("assignment_id", assignment_id)
+        if group_assignment_id:
+            team_insert["assignment_id"] = group_assignment_id
+
         try:
             # 1. Create the team
             team_res = supabase.table("teams").insert(team_insert).execute()
@@ -113,11 +118,28 @@ def save_teams(matches_parsed, class_id=None, max_team_size=None):
             team_id = team_res.data[0]["id"]
             created_team_ids.append(team_id)
 
-            # 2. Update all members of this team in ONE request (Batch Update)
-            # This is significantly faster than one-by-one updates
-            update_res = supabase.table("student_profiles").update({"team_id": team_id}).in_("id", valid_members).execute()
+            # 2. Assign members
+            if group_assignment_id:
+                supabase.table("team_members").delete().eq(
+                    "assignment_id", group_assignment_id
+                ).in_("student_id", valid_members).execute()
+                member_rows = [
+                    {
+                        "student_id": member_id,
+                        "team_id": team_id,
+                        "assignment_id": group_assignment_id,
+                    }
+                    for member_id in valid_members
+                ]
+                insert_res = supabase.table("team_members").insert(member_rows).execute()
+                assigned_count = len(insert_res.data or [])
+            else:
+                update_res = supabase.table("student_profiles").update(
+                    {"team_id": team_id}
+                ).in_("id", valid_members).execute()
+                assigned_count = len(update_res.data or [])
 
-            print(f"Successfully created Team {idx} and assigned {len(update_res.data)} students.")
+            print(f"Successfully created Team {idx} and assigned {assigned_count} students.")
             
             # 3. Generate and insert coaching messages for the team
             try:
@@ -229,6 +251,22 @@ def compute_collaboration_balance_for_teams(team_ids: list) -> dict:
         gini = compute_gini_from_counts(counts) if counts else 0.0
         balances[tid] = gini
     return balances
+
+def reset_assignment_teams(assignment_id):
+    """
+    Deletes all teams for a specific assignment.
+    team_members rows are removed via ON DELETE CASCADE.
+    """
+    if not supabase:
+        print("Error: Supabase client is not initialized.")
+        return
+
+    try:
+        supabase.table("teams").delete().eq("assignment_id", assignment_id).execute()
+        print(f"Deleted all teams for assignment {assignment_id}.")
+    except Exception as e:
+        print(f"Reset assignment teams error: {e}")
+
 
 def reset_matches():
     """

@@ -16,9 +16,10 @@ interface TeamFeedbackAverage {
 
 interface FeedbackAnalyticsPanelProps {
   classId: string;
+  assignmentId?: string;
 }
 
-export function FeedbackAnalyticsPanel({ classId }: FeedbackAnalyticsPanelProps) {
+export function FeedbackAnalyticsPanel({ classId, assignmentId }: FeedbackAnalyticsPanelProps) {
   const [averages, setAverages] = useState<TeamFeedbackAverage[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -35,11 +36,23 @@ export function FeedbackAnalyticsPanel({ classId }: FeedbackAnalyticsPanelProps)
       try {
         const supabase = createStudentBrowserClient();
         // Bound the data fetch with a timeout to avoid leaving the UI stuck
-        const teamsRes = await supabase.from("teams").select("id, name").eq("class_id", classId);
+        let teamsQuery = supabase.from("teams").select("id, name").eq("class_id", classId);
+        if (assignmentId) {
+          teamsQuery = teamsQuery.eq("assignment_id", assignmentId);
+        }
+        const teamsRes = await teamsQuery;
         const teamIds = teamsRes.data?.map((t: any) => t.id) || [];
 
+        let feedbackQuery = supabase
+          .from("feedback")
+          .select("team_id, overall_satisfaction, match_explanation_seconds")
+          .eq("class_id", classId);
+        if (assignmentId) {
+          feedbackQuery = feedbackQuery.eq("assignment_id", assignmentId);
+        }
+
         const fetchPromise = Promise.all([
-          supabase.from("feedback").select("team_id, overall_satisfaction, match_explanation_seconds").eq("class_id", classId),
+          feedbackQuery,
           teamsRes,
           // message_read_times stores seconds spent reading coach messages (one row per student/message)
           supabase.from("message_read_times").select("team_id, seconds").in("team_id", teamIds),
@@ -162,7 +175,7 @@ export function FeedbackAnalyticsPanel({ classId }: FeedbackAnalyticsPanelProps)
     return () => {
       isMounted = false;
     };
-  }, [classId]);
+  }, [classId, assignmentId]);
 
   if (isLoading) {
     return (

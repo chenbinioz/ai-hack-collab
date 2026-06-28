@@ -16,17 +16,13 @@ interface Teammate {
   survey_name: string | null;
 }
 
-type StudentProfile = {
-  id: string;
-  survey_name: string | null;
-  team_id: string | null;
-};
-
 interface TeamHubProps {
-  classId?: string; // Optional: if provided, only show teams from this class
+  assignmentId: string;
+  classId?: string;
+  className?: string;
 }
 
-export function TeamHub({ classId }: TeamHubProps = {}) {
+export function TeamHub({ assignmentId, classId, className = "mt-10" }: TeamHubProps) {
   const [team, setTeam] = useState<Team | null>(null);
   const [teammates, setTeammates] = useState<Teammate[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -43,86 +39,76 @@ export function TeamHub({ classId }: TeamHubProps = {}) {
       setIsLoading(true);
       setError(null);
 
-      // Get current user
       const { data: { user }, error: userError } = await supabase.auth.getUser();
       if (userError || !user) {
         throw new Error("Not authenticated");
       }
 
-      // Fetch user's profile using student RPC function
-      const { data: profileData, error: profileError } = await supabase
-        .rpc('get_student_own_profile');
+      const { data: memberRow, error: memberError } = await supabase
+        .from("team_members")
+        .select("team_id")
+        .eq("assignment_id", assignmentId)
+        .eq("student_id", user.id)
+        .maybeSingle();
 
-      if (profileError) {
-        throw profileError;
+      if (memberError) {
+        throw memberError;
       }
 
-      if (!profileData || profileData.length === 0) {
-        throw new Error("Profile not found or survey not completed");
+      const teamId = memberRow?.team_id ?? null;
+
+      if (!teamId) {
+        setTeam(null);
+        setTeammates([]);
+        setHasSubmittedFeedback(false);
+        return;
       }
 
-      const currentUserProfile = profileData[0];
+      const { data: existingFeedback } = await supabase
+        .from("feedback")
+        .select("id")
+        .eq("student_id", user.id)
+        .eq("team_id", teamId)
+        .eq("assignment_id", assignmentId)
+        .limit(1);
 
-      if (!currentUserProfile.team_id) {
-        // No team assigned yet
+      setHasSubmittedFeedback(!!(existingFeedback && existingFeedback.length > 0));
+
+      const { data: teamData, error: teamError } = await supabase
+        .from("teams")
+        .select("*")
+        .eq("id", teamId)
+        .eq("assignment_id", assignmentId)
+        .single();
+
+      if (teamError || !teamData) {
         setTeam(null);
         setTeammates([]);
         return;
       }
 
-      // Check if user has already submitted feedback for this team
-      const feedbackQuery = supabase
-        .from("feedback")
-        .select("id")
-        .eq("student_id", user.id)
-        .eq("team_id", currentUserProfile.team_id)
-        .limit(1);
-
-      // If classId is provided, also filter feedback by class
-      if (classId) {
-        feedbackQuery.eq("class_id", classId);
-      }
-
-      const { data: existingFeedback } = await feedbackQuery;
-
-      setHasSubmittedFeedback(!!(existingFeedback && existingFeedback.length > 0));
-
-      // Fetch team details - filter by class if provided
-      let teamQuery = supabase
-        .from("teams")
-        .select("*")
-        .eq("id", currentUserProfile.team_id);
-
-      if (classId) {
-        teamQuery = teamQuery.eq("class_id", classId);
-      }
-
-      const { data: teamData, error: teamError } = await teamQuery.single();
-
-      if (teamError || !teamData) {
-        // If classId is specified and team doesn't belong to that class, show no team
-        if (classId) {
-          setTeam(null);
-          setTeammates([]);
-          return;
-        }
-        throw new Error("Team not found");
-      }
-
       setTeam(teamData);
 
-      // Use security-definer RPC for teammate visibility under RLS.
       let { data: teammatesData, error: teammatesError } = await supabase
-        .rpc("get_my_teammates");
+        .rpc("get_my_teammates", { p_assignment_id: assignmentId });
 
       if (teammatesError) {
-        // Fallback for environments where the RPC migration is not yet applied.
         const fallback = await supabase
-          .from("student_profiles")
-          .select("id, survey_name")
-          .eq("team_id", currentUserProfile.team_id)
-          .neq("id", user.id);
-        teammatesData = fallback.data;
+          .from("team_members")
+          .select("student_id, student_profiles(id, survey_name)")
+          .eq("team_id", teamId)
+          .eq("assignment_id", assignmentId)
+          .neq("student_id", user.id);
+
+        teammatesData = (fallback.data || []).map((row) => {
+          const profile = Array.isArray(row.student_profiles)
+            ? row.student_profiles[0]
+            : row.student_profiles;
+          return {
+            id: profile?.id ?? row.student_id,
+            survey_name: profile?.survey_name ?? null,
+          };
+        });
         teammatesError = fallback.error;
       }
 
@@ -130,44 +116,33 @@ export function TeamHub({ classId }: TeamHubProps = {}) {
         console.error("Error fetching teammates:", teammatesError);
         setTeammates([]);
       } else {
-        setTeammates(teammatesData || []);
+        const rpcTeammates = (teammatesData || []) as Teammate[];
+        setTeammates(rpcTeammates.filter((student) => student.id !== user.id));
       }
-
-      // Filter to only those in the same team, excluding current user
-      const rpcTeammates = (teammatesData || []) as Teammate[];
-      const teamTeammates = rpcTeammates.filter((student: Teammate) =>
-        student.id !== user.id
-      );
-
-      setTeam(teamData as Team);
-      setTeammates(teamTeammates as Teammate[]);
-
     } catch (err: unknown) {
-      let errorMessage = 'Failed to load team information';
+      let errorMessage = "Failed to load team information";
       if (err instanceof Error) {
         errorMessage = err.message;
-      } else if (typeof err === 'object' && err !== null && 'message' in err) {
-        // Handle Supabase error objects which may not be Error instances
+      } else if (typeof err === "object" && err !== null && "message" in err) {
         errorMessage = String((err as { message: string }).message);
       }
 
-      console.error('Error fetching team data:', err);
+      console.error("Error fetching team data:", err);
       setError(errorMessage);
     } finally {
       setIsLoading(false);
     }
-  }, [supabase]);
+  }, [supabase, assignmentId]);
 
   useEffect(() => {
     void fetchTeamData();
   }, [fetchTeamData]);
 
-  // attach the visibility timer for the match explanation element
   useMatchExplanationTimer(reasonRef, setReadingTimeSeconds);
 
   if (isLoading) {
     return (
-      <section className="mt-10 rounded-2xl border border-black/10 bg-surface p-6 shadow-sm dark:border-white/10 sm:p-8">
+      <section className={`${className} rounded-2xl border border-black/10 bg-surface p-6 shadow-sm dark:border-white/10 sm:p-8`}>
         <div className="flex items-center justify-center py-8">
           <div className="flex items-center gap-2 text-muted">
             <svg
@@ -199,7 +174,7 @@ export function TeamHub({ classId }: TeamHubProps = {}) {
 
   if (error) {
     return (
-      <section className="mt-10 rounded-2xl border border-red-200 bg-red-50 p-6 shadow-sm dark:border-red-800 dark:bg-red-950/30 sm:p-8">
+      <section className={`${className} rounded-2xl border border-red-200 bg-red-50 p-6 shadow-sm dark:border-red-800 dark:bg-red-950/30 sm:p-8`}>
         <h2 className="text-lg font-semibold text-red-900 dark:text-red-100">Team Hub</h2>
         <p className="mt-2 text-sm text-red-700 dark:text-red-300">
           Error loading team information: {error}
@@ -209,7 +184,7 @@ export function TeamHub({ classId }: TeamHubProps = {}) {
   }
 
   return (
-    <section className="mt-10 rounded-2xl border border-black/10 bg-surface p-6 shadow-sm dark:border-white/10 sm:p-8">
+    <section className={`${className} rounded-2xl border border-black/10 bg-surface p-6 shadow-sm dark:border-white/10 sm:p-8`}>
       <h2 className="text-lg font-semibold text-foreground">Team Hub</h2>
 
       {!team ? (
@@ -237,7 +212,6 @@ export function TeamHub({ classId }: TeamHubProps = {}) {
       ) : (
         <>
           <div className="mt-4 space-y-6">
-            {/* Team Info */}
             <div className="rounded-lg border border-black/5 bg-white p-4 dark:border-white/10 dark:bg-zinc-900">
               <h3 className="text-lg font-semibold text-foreground">{team.name}</h3>
               <div ref={reasonRef} className="mt-2 text-sm text-muted" aria-label="match-explanation">
@@ -245,7 +219,6 @@ export function TeamHub({ classId }: TeamHubProps = {}) {
               </div>
             </div>
 
-            {/* Teammates */}
             <div>
               <h4 className="text-sm font-medium text-foreground mb-3">
                 Your Teammates ({teammates.length})
@@ -289,7 +262,6 @@ export function TeamHub({ classId }: TeamHubProps = {}) {
             </div>
           </div>
 
-          {/* Feedback segment */}
           <div className="rounded-lg border border-black/5 bg-white p-4 dark:border-white/10 dark:bg-zinc-900">
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <div>
@@ -318,16 +290,16 @@ export function TeamHub({ classId }: TeamHubProps = {}) {
         </>
       )}
 
-      {/* Team Messaging - only show when team is assigned */}
-          {team && (
+      {team && (
         <>
           <FeedbackModal
             open={showFeedbackModal}
             teamName={team.name}
             teamId={team.id}
             classId={classId}
-                readingTimeSeconds={readingTimeSeconds}
-                onClose={() => setShowFeedbackModal(false)}
+            assignmentId={assignmentId}
+            readingTimeSeconds={readingTimeSeconds}
+            onClose={() => setShowFeedbackModal(false)}
             onSubmitted={() => setHasSubmittedFeedback(true)}
           />
           <TeamMessaging teamId={team.id} teamName={team.name} />
@@ -337,7 +309,6 @@ export function TeamHub({ classId }: TeamHubProps = {}) {
   );
 }
 
-// Measure visibility time for the match explanation element
 function useMatchExplanationTimer(ref: React.RefObject<HTMLDivElement | null>, setReadingTimeSeconds: (v: number | null) => void) {
   const startRef = useRef<number | null>(null);
   useEffect(() => {

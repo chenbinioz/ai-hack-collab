@@ -5,7 +5,6 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useStudentAuth } from "@/app/providers";
 import { useStudentProfileSurveyStatus } from "@/lib/hooks/use-student-profile-survey-status";
-import { TeamHub } from "@/components/team-hub";
 import { StudentSkillsVisualization } from "./student-skills-visualization";
 import { JoinClassSection } from "./join-class-section";
 import { ClassTeamSection } from "./class-team-section";
@@ -15,11 +14,8 @@ interface StudentClass {
   name: string;
   description: string;
   code: string;
-  coursework_deadline: string | null;
   enrolled_at: string;
   role: string;
-  max_team_size: number;
-  ai_preferences: any;
 }
 
 type TabType = "overview" | "skills" | string; // Allow class IDs as tabs
@@ -275,10 +271,6 @@ export function StudentHomeView() {
                             <p className="mt-1 text-sm text-muted">{cls.description}</p>
                             <div className="mt-2 flex items-center gap-4 text-xs text-muted">
                               <span>Class Code: <code className="rounded bg-black/5 px-1 py-0.5 dark:bg-white/10">{cls.code}</code></span>
-                              <span>Max Team Size: {cls.max_team_size}</span>
-                              <span>
-                                Deadline: {cls.coursework_deadline ? new Date(cls.coursework_deadline).toLocaleDateString() : "Not set"}
-                              </span>
                               <span>Joined {new Date(cls.enrolled_at).toLocaleDateString()}</span>
                             </div>
                           </div>

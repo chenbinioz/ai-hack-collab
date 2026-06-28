@@ -10,9 +10,8 @@ interface Class {
   name: string;
   description: string;
   code: string;
-  coursework_deadline: string | null;
-  max_team_size: number;
   student_count: number;
+  assignment_count?: number;
   created_at: string;
 }
 
@@ -120,7 +119,7 @@ export function ClassesList() {
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-xl font-semibold text-foreground">Your Classes</h2>
-          <p className="text-sm text-muted">Manage student enrollment and team generation</p>
+          <p className="text-sm text-muted">Manage student enrollment and assignments</p>
         </div>
         <button
           onClick={() => setShowCreateModal(true)}
@@ -181,22 +180,14 @@ export function ClassesList() {
                   <span className="font-medium text-foreground">{classItem.student_count}</span>
                 </div>
                 <div className="flex items-center justify-between text-sm">
-                  <span className="text-muted">Max team size</span>
-                  <span className="font-medium text-foreground">{classItem.max_team_size}</span>
+                  <span className="text-muted">Assignments</span>
+                  <span className="font-medium text-foreground">{classItem.assignment_count ?? 0}</span>
                 </div>
                 <div className="flex items-center justify-between text-sm">
                   <span className="text-muted">Join code</span>
                   <code className="rounded bg-black/5 px-2 py-0.5 text-xs font-mono dark:bg-white/10">
                     {classItem.code}
                   </code>
-                </div>
-                <div className="flex items-center justify-between text-sm">
-                  <span className="text-muted">Deadline</span>
-                  <span className="font-medium text-foreground">
-                    {classItem.coursework_deadline
-                      ? new Date(classItem.coursework_deadline).toLocaleString()
-                      : "Not set"}
-                  </span>
                 </div>
               </div>
 

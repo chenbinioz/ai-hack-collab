@@ -23,11 +23,8 @@ export async function GET() {
       name: row.name,
       description: row.description,
       code: row.code,
-      coursework_deadline: row.coursework_deadline ?? null,
       enrolled_at: row.enrolled_at,
       role: row.role,
-      max_team_size: row.max_team_size,
-      ai_preferences: row.ai_preferences,
     }));
 
     return NextResponse.json({ classes });
