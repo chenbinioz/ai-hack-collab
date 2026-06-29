@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import { createStudentBrowserClient } from "@/lib/supabase/student-browser-client";
 import { FeedbackAnalyticsPanel } from "@/app/educator/(workspace)/survey-results/feedback-analytics-panel";
 import { AssignmentAttachmentsPanel } from "./assignment-attachments-panel";
+import { AssignmentProgressTracker } from "@/components/assignment-progress-tracker";
 
 export interface Assignment {
   id: string;
@@ -108,6 +109,16 @@ function sortedFactorWeights(weights?: Record<string, number>) {
   return Object.entries(weights)
     .filter((entry) => Number.isFinite(entry[1]))
     .sort((a, b) => b[1] - a[1]);
+}
+
+function getErrorMessage(error: unknown, fallback: string) {
+  if (error instanceof Error) {
+    return error.message || fallback;
+  }
+  if (typeof error === "object" && error !== null && "message" in error) {
+    return String((error as { message?: unknown }).message ?? fallback);
+  }
+  return fallback;
 }
 
 function SurveyTable({ responses }: { responses: SurveyResponse[] }) {
@@ -239,8 +250,8 @@ export function AssignmentCard({
       setError(null);
       await patchAssignment({ due_date: dueDateInput || null });
       onRefresh();
-    } catch (err: any) {
-      setError(err.message || "Failed to update due date");
+    } catch (err: unknown) {
+      setError(getErrorMessage(err, "Failed to update due date"));
     } finally {
       setIsSavingDueDate(false);
     }
@@ -255,8 +266,8 @@ export function AssignmentCard({
         ai_preferences: aiPreferences,
       });
       onRefresh();
-    } catch (err: any) {
-      setError(err.message || "Failed to update team settings");
+    } catch (err: unknown) {
+      setError(getErrorMessage(err, "Failed to update team settings"));
     } finally {
       setIsSavingTeamSettings(false);
     }
@@ -309,8 +320,8 @@ export function AssignmentCard({
       }
 
       onRefresh();
-    } catch (err: any) {
-      setError(err.message || "Failed to generate teams");
+    } catch (err: unknown) {
+      setError(getErrorMessage(err, "Failed to generate teams"));
     } finally {
       setIsGeneratingTeams(false);
     }
@@ -331,8 +342,8 @@ export function AssignmentCard({
       }
 
       onRefresh();
-    } catch (err: any) {
-      setError(err.message || "Failed to reset teams");
+    } catch (err: unknown) {
+      setError(getErrorMessage(err, "Failed to reset teams"));
     } finally {
       setIsResettingTeams(false);
     }
@@ -358,6 +369,14 @@ export function AssignmentCard({
           mode="manage"
         />
       </div>
+
+      <AssignmentProgressTracker
+        classId={classId}
+        assignmentId={assignment.id}
+        mode="educator"
+        teams={teams.map((team) => ({ id: team.id, name: team.name }))}
+        className="mt-0"
+      />
 
       <div className="flex flex-col gap-3 sm:max-w-md">
         <label htmlFor={`due_date_${assignment.id}`} className="text-sm font-medium text-foreground">
