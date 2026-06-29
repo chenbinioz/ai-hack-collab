@@ -7,12 +7,13 @@ import { useParams, useRouter } from "next/navigation";
 import { createStudentBrowserClient } from "@/lib/supabase/student-browser-client";
 import {
   AssignmentCard,
+  SurveyTable,
   type Assignment,
   type SurveyResponse,
 } from "@/app/educator/(workspace)/classes/assignment-card";
+import { type DraftTeam } from "./draft-teams-board";
 import { CreateAssignmentModal } from "@/app/educator/(workspace)/classes/create-assignment-modal";
 import { ClassFeedbackOverview } from "@/app/educator/(workspace)/classes/class-feedback-overview";
-import { DraftTeamsBoard, DraftTeam } from "./draft-teams-board";
 
 interface ClassDetails {
   id: string;
@@ -68,6 +69,7 @@ export default function ClassManagementPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showCreateAssignmentModal, setShowCreateAssignmentModal] = useState(false);
+  const [activeAssignmentId, setActiveAssignmentId] = useState<string | null>(null);
 
   const supabase = createStudentBrowserClient();
 
@@ -76,6 +78,17 @@ export default function ClassManagementPage() {
       fetchClassData();
     }
   }, [classId]);
+
+  useEffect(() => {
+    if (assignments.length === 0) {
+      setActiveAssignmentId(null);
+      return;
+    }
+
+    if (!activeAssignmentId || !assignments.some((assignment) => assignment.id === activeAssignmentId)) {
+      setActiveAssignmentId(assignments[0].id);
+    }
+  }, [assignments, activeAssignmentId]);
 
   const fetchClassData = async (options?: { silent?: boolean }) => {
     try {
@@ -263,6 +276,26 @@ export default function ClassManagementPage() {
   };
 
   const completedResponses = surveyResponses.filter((r) => r.survey_completed);
+  const studentNames = Object.fromEntries(
+    surveyResponses.map((response) => [response.student_id, response.name]),
+  );
+  const studentsMapForDrafts = Object.fromEntries(
+    surveyResponses.map((r) => [
+      r.student_id,
+      {
+        id: r.student_id,
+        name: r.name,
+        email: r.email,
+        workload: r.survey_approach_heavy_workload,
+        coding: r.survey_confidence_coding,
+      },
+    ]),
+  );
+
+  const getDraftsForAssignment = (assignmentId: string) =>
+    drafts.filter((draft) => draft.assignment_id === assignmentId);
+
+  const activeAssignment = assignments.find((assignment) => assignment.id === activeAssignmentId) ?? null;
 
   const getTeamMemberMap = (assignmentId: string) => {
     const map = new Map<string, string>();
@@ -432,7 +465,7 @@ export default function ClassManagementPage() {
           <div>
             <h2 className="text-lg font-semibold text-foreground">Assignments</h2>
             <p className="text-sm text-muted">
-              Each assignment has its own deadline, team settings, and team generation.
+              Switch tabs to manage each assignment&apos;s teams, drafts, and progress tracker.
             </p>
           </div>
           <button
@@ -458,42 +491,9 @@ export default function ClassManagementPage() {
         <div className="mt-8">
           <ClassFeedbackOverview classId={classId} />
         </div>
-      </div>
-
-      {/* Draft Teams Section */}
-      {drafts.length > 0 && (
-        <div className="rounded-2xl border border-black/10 bg-surface p-6 shadow-sm dark:border-white/10 mt-8">
-          <DraftTeamsBoard
-            classId={classId}
-            drafts={drafts}
-            studentsMap={
-              Object.fromEntries(surveyResponses.map(r => [
-                r.student_id,
-                { id: r.student_id, name: r.name, email: r.email, workload: r.survey_approach_heavy_workload, coding: r.survey_confidence_coding }
-              ]))
-            }
-            onSwap={handleSwapDraft}
-            onPublish={handlePublishTeams}
-          />
-        </div>
-      )}
-
-      {/* Class Survey Responses */}
-      <div className="rounded-2xl border border-black/10 bg-surface p-6 shadow-sm dark:border-white/10">
-        <div className="flex items-center justify-between gap-4">
-          <div>
-            <h2 className="text-lg font-semibold text-foreground">Class survey responses</h2>
-            <p className="mt-2 text-sm text-muted">
-              Student profile survey answers for the current class only.
-            </p>
-          </div>
-          <p className="text-sm text-muted">
-            {completedResponses.length} of {surveyResponses.length} completed
-          </p>
-        </div>
 
         {assignments.length === 0 ? (
-          <div className="rounded-2xl border border-dashed border-black/15 bg-black/[0.02] p-8 text-center dark:border-white/20 dark:bg-white/[0.03]">
+          <div className="mt-6 rounded-2xl border border-dashed border-black/15 bg-black/[0.02] p-8 text-center dark:border-white/20 dark:bg-white/[0.03]">
             <p className="text-sm text-muted">No assignments yet. Add one to set deadlines and generate teams.</p>
             <button
               onClick={() => setShowCreateAssignmentModal(true)}
@@ -503,20 +503,49 @@ export default function ClassManagementPage() {
             </button>
           </div>
         ) : (
-          <div className="space-y-6">
-            {assignments.map((assignment) => (
-              <AssignmentCard
-                key={assignment.id}
-                assignment={assignment}
-                classId={classId}
-                teams={teams}
-                teamMemberMap={getTeamMemberMap(assignment.id)}
-                surveyResponses={surveyResponses}
-                enrolledStudentCount={enrolledStudents.length}
-                onRefresh={fetchClassData}
-                onTeamsUpdated={applyAssignmentTeams}
-              />
-            ))}
+          <div className="mt-6">
+            <div className="border-b border-black/10 dark:border-white/10">
+              <nav className="-mb-px flex gap-2 overflow-x-auto pb-px" aria-label="Assignments">
+                {assignments.map((assignment) => {
+                  const isActive = assignment.id === activeAssignmentId;
+                  return (
+                    <button
+                      key={assignment.id}
+                      type="button"
+                      onClick={() => setActiveAssignmentId(assignment.id)}
+                      className={`shrink-0 rounded-t-xl border px-4 py-2.5 text-sm font-medium transition-colors ${
+                        isActive
+                          ? "border-black/10 border-b-transparent bg-surface text-brand dark:border-white/10"
+                          : "border-transparent text-muted hover:border-black/10 hover:bg-black/[0.02] hover:text-foreground dark:hover:border-white/10 dark:hover:bg-white/[0.03]"
+                      }`}
+                    >
+                      {assignment.title}
+                    </button>
+                  );
+                })}
+              </nav>
+            </div>
+
+            {activeAssignment ? (
+              <div className="pt-6">
+                <AssignmentCard
+                  key={activeAssignment.id}
+                  assignment={activeAssignment}
+                  classId={classId}
+                  teams={teams}
+                  teamMemberMap={getTeamMemberMap(activeAssignment.id)}
+                  studentNames={studentNames}
+                  enrolledStudentCount={enrolledStudents.length}
+                  drafts={getDraftsForAssignment(activeAssignment.id)}
+                  studentsMap={studentsMapForDrafts}
+                  expectedDraftMemberCount={completedResponses.length}
+                  onSwapDraft={handleSwapDraft}
+                  onPublishDraftTeams={handlePublishTeams}
+                  onRefresh={fetchClassData}
+                  onTeamsUpdated={applyAssignmentTeams}
+                />
+              </div>
+            ) : null}
           </div>
         )}
       </div>
@@ -577,6 +606,30 @@ export default function ClassManagementPage() {
                 </div>
               </div>
             ))}
+          </div>
+        )}
+      </div>
+
+      <div className="rounded-2xl border border-black/10 bg-surface p-6 shadow-sm dark:border-white/10">
+        <div className="flex items-center justify-between gap-4">
+          <div>
+            <h2 className="text-lg font-semibold text-foreground">Class survey responses</h2>
+            <p className="mt-2 text-sm text-muted">
+              Profile survey answers for all enrolled students in this class (not tied to assignment teams).
+            </p>
+          </div>
+          <p className="text-sm text-muted">
+            {completedResponses.length} of {surveyResponses.length} completed
+          </p>
+        </div>
+
+        {completedResponses.length === 0 ? (
+          <div className="mt-4 rounded-2xl border border-dashed border-black/15 bg-black/[0.02] p-6 text-center dark:border-white/20 dark:bg-white/[0.03]">
+            <p className="text-sm text-muted">No completed surveys yet for this class.</p>
+          </div>
+        ) : (
+          <div className="mt-4 overflow-hidden rounded-2xl border border-black/6 bg-white shadow-sm dark:border-white/10 dark:bg-zinc-950">
+            <SurveyTable responses={completedResponses} />
           </div>
         )}
       </div>

@@ -8,17 +8,13 @@ import { useStudentProfileSurveyStatus } from "@/lib/hooks/use-student-profile-s
 import { StudentSkillsVisualization } from "./student-skills-visualization";
 import { JoinClassSection } from "./join-class-section";
 import { ClassTeamSection } from "./class-team-section";
+import {
+  findStudentClassGroup,
+  groupStudentClasses,
+  type StudentClass,
+} from "@/lib/student-class-groups";
 
-interface StudentClass {
-  id: string;
-  name: string;
-  description: string;
-  code: string;
-  enrolled_at: string;
-  role: string;
-}
-
-type TabType = "overview" | "skills" | string; // Allow class IDs as tabs
+type TabType = "overview" | "skills" | string; // Allow class group IDs as tabs
 
 export function StudentHomeView() {
   const router = useRouter();
@@ -32,6 +28,9 @@ export function StudentHomeView() {
 
   // Get active tab from URL params, default to overview
   const activeTab: TabType = searchParams.get("tab") || "overview";
+  const classGroups = groupStudentClasses(classes);
+  const activeClassGroup = findStudentClassGroup(classGroups, activeTab);
+  const resolvedActiveTab = activeClassGroup?.id ?? activeTab;
 
   const meta = user?.user_metadata;
   const displayName =
@@ -46,6 +45,16 @@ export function StudentHomeView() {
       fetchStudentClasses();
     }
   }, [user]);
+
+  useEffect(() => {
+    if (!activeClassGroup || activeTab === activeClassGroup.id) {
+      return;
+    }
+
+    const params = new URLSearchParams(searchParams);
+    params.set("tab", activeClassGroup.id);
+    router.replace(`/student?${params.toString()}`, { scroll: false });
+  }, [activeClassGroup, activeTab, router, searchParams]);
 
   const fetchStudentClasses = async () => {
     try {
@@ -90,14 +99,15 @@ export function StudentHomeView() {
     } else {
       params.set("tab", tab);
     }
+    params.delete("assignment");
     router.replace(`/student?${params.toString()}`, { scroll: false });
   }
 
-  // Get available tabs (overview, skills, and each class)
+  // Get available tabs (overview, skills, and each grouped class)
   const availableTabs = [
     { id: "overview", label: "Overview" },
     { id: "skills", label: "Skills" },
-    ...classes.map(cls => ({ id: cls.id, label: cls.name }))
+    ...classGroups.map((group) => ({ id: group.id, label: group.name })),
   ];
 
   if (isStudentAuthLoading || !user || isSurveyStatusLoading) {
@@ -141,7 +151,7 @@ export function StudentHomeView() {
                 key={tab.id}
                 onClick={() => handleTabChange(tab.id)}
                 className={`pb-4 px-1 border-b-2 font-medium text-sm transition-colors whitespace-nowrap ${
-                  activeTab === tab.id
+                  resolvedActiveTab === tab.id
                     ? "border-brand text-brand"
                     : "border-transparent text-muted hover:text-foreground hover:border-black/20"
                 }`}
@@ -260,22 +270,32 @@ export function StudentHomeView() {
                   </div>
                 ) : (
                   <div className="mt-6 space-y-4">
-                    {classes.map((cls) => (
+                    {classGroups.map((group) => (
                       <div
-                        key={cls.id}
+                        key={group.id}
                         className="rounded-xl border border-black/10 bg-white p-4 transition hover:bg-black/[0.02] dark:border-white/15 dark:bg-zinc-900 dark:hover:bg-white/[0.02]"
                       >
                         <div className="flex items-start justify-between">
                           <div className="flex-1">
-                            <h3 className="font-medium text-foreground">{cls.name}</h3>
-                            <p className="mt-1 text-sm text-muted">{cls.description}</p>
-                            <div className="mt-2 flex items-center gap-4 text-xs text-muted">
-                              <span>Class Code: <code className="rounded bg-black/5 px-1 py-0.5 dark:bg-white/10">{cls.code}</code></span>
-                              <span>Joined {new Date(cls.enrolled_at).toLocaleDateString()}</span>
+                            <h3 className="font-medium text-foreground">{group.name}</h3>
+                            <p className="mt-1 text-sm text-muted">{group.description}</p>
+                            <div className="mt-2 flex flex-wrap items-center gap-4 text-xs text-muted">
+                              {group.classes.map((cls) => (
+                                <span key={cls.id}>
+                                  Class Code:{" "}
+                                  <code className="rounded bg-black/5 px-1 py-0.5 dark:bg-white/10">
+                                    {cls.code}
+                                  </code>
+                                </span>
+                              ))}
+                              <span>
+                                Joined{" "}
+                                {new Date(group.classes[0].enrolled_at).toLocaleDateString()}
+                              </span>
                             </div>
                           </div>
                           <button
-                            onClick={() => handleTabChange(cls.id)}
+                            onClick={() => handleTabChange(group.id)}
                             className="ml-4 rounded-lg bg-brand px-3 py-1.5 text-xs font-medium text-white transition hover:bg-brand-deep"
                           >
                             View Details
@@ -314,11 +334,8 @@ export function StudentHomeView() {
           )}
 
           {/* Class-specific tabs */}
-          {classes.find(cls => cls.id === activeTab) && (
-            <ClassTeamSection
-              classId={activeTab}
-              classInfo={classes.find((cls) => cls.id === activeTab) || null}
-            />
+          {activeClassGroup && (
+            <ClassTeamSection classGroup={activeClassGroup} />
           )}
         </div>
       </main>

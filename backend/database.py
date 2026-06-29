@@ -208,8 +208,9 @@ def save_team_drafts(matches_parsed, class_id=None, max_team_size=None, assignme
         return []
         
     created_team_ids = []
+    team_number = 0
     
-    for idx, group in enumerate(groups, start=1):
+    for group in groups:
         reason = group.get("reason", "")
         members = group.get("members", [])
         match_trace = group.get("match_trace", [])
@@ -219,9 +220,11 @@ def save_team_drafts(matches_parsed, class_id=None, max_team_size=None, assignme
         valid_members = [m for m in members if isinstance(m, str) and len(m) == 36]
         if not valid_members:
             continue
+
+        team_number += 1
             
         team_insert = {
-            "name": f"Team {idx}",
+            "name": f"Team {team_number}",
             "reason": reason,
             "match_explanation": {
                 "factor_weights": factor_weights,
@@ -234,6 +237,7 @@ def save_team_drafts(matches_parsed, class_id=None, max_team_size=None, assignme
         if group_assignment_id:
             team_insert["assignment_id"] = group_assignment_id
             
+        team_id = None
         try:
             team_res = db.table("team_drafts").insert(team_insert).execute()
             if not team_res.data:
@@ -246,7 +250,13 @@ def save_team_drafts(matches_parsed, class_id=None, max_team_size=None, assignme
             db.table("team_draft_members").insert(member_inserts).execute()
             
         except Exception as e:
-            print(f"Supabase Error processing draft Team {idx}: {e}")
+            print(f"Supabase Error processing draft Team {team_number}: {e}")
+            if team_id:
+                try:
+                    db.table("team_drafts").delete().eq("id", team_id).execute()
+                    created_team_ids = [draft_id for draft_id in created_team_ids if draft_id != team_id]
+                except Exception as cleanup_err:
+                    print(f"Warning: Failed to roll back draft team {team_id}: {cleanup_err}")
             
     return created_team_ids
 

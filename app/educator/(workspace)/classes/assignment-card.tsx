@@ -12,6 +12,11 @@ import {
 } from "@/lib/matching/skill-preferences";
 import { AssignmentAttachmentsPanel } from "./assignment-attachments-panel";
 import { AssignmentProgressTracker } from "@/components/assignment-progress-tracker";
+import {
+  DraftTeamsBoard,
+  type DraftTeam,
+  type StudentStats,
+} from "./[classId]/draft-teams-board";
 
 export interface Assignment {
   id: string;
@@ -75,8 +80,13 @@ interface AssignmentCardProps {
   classId: string;
   teams: Team[];
   teamMemberMap: Map<string, string>;
-  surveyResponses: SurveyResponse[];
+  studentNames: Record<string, string>;
   enrolledStudentCount: number;
+  drafts?: DraftTeam[];
+  studentsMap?: Record<string, StudentStats>;
+  expectedDraftMemberCount?: number;
+  onSwapDraft?: (studentId: string, fromDraftId: string, toDraftId: string, reason: string) => Promise<void>;
+  onPublishDraftTeams?: () => Promise<void>;
   onRefresh: (options?: { silent?: boolean }) => void | Promise<void>;
   onTeamsUpdated?: (
     assignmentId: string,
@@ -161,7 +171,7 @@ function getErrorMessage(error: unknown, fallback: string) {
   return fallback;
 }
 
-function SurveyTable({ responses }: { responses: SurveyResponse[] }) {
+export function SurveyTable({ responses }: { responses: SurveyResponse[] }) {
   return (
     <div className="overflow-x-auto">
       <table className="w-full min-w-[40rem] border-collapse text-left">
@@ -213,8 +223,13 @@ export function AssignmentCard({
   classId,
   teams,
   teamMemberMap,
-  surveyResponses,
+  studentNames,
   enrolledStudentCount,
+  drafts = [],
+  studentsMap = {},
+  expectedDraftMemberCount,
+  onSwapDraft,
+  onPublishDraftTeams,
   onRefresh,
   onTeamsUpdated,
 }: AssignmentCardProps) {
@@ -253,27 +268,14 @@ export function AssignmentCard({
     teamSizeReport.teams.map((entry) => [entry.teamId, entry]),
   );
 
-  const completedResponses = surveyResponses.filter((response) => response.survey_completed);
-
-  const responsesWithTeam = completedResponses.map((response) => ({
-    ...response,
-    team_id: teamMemberMap.get(response.student_id) ?? null,
-  }));
-
-  const completedGroupedByTeam = responsesWithTeam.reduce((groups, response) => {
-    const key = response.team_id ?? "__ungrouped";
-    const current = groups.get(key) ?? [];
-    current.push(response);
-    groups.set(key, current);
-    return groups;
-  }, new Map<string, typeof responsesWithTeam>());
-
-  const groupedTeams = assignmentTeams.map((team) => ({
-    id: team.id,
-    name: team.name,
-    responses: completedGroupedByTeam.get(team.id) ?? [],
-  }));
-  const ungroupedResponses = completedGroupedByTeam.get("__ungrouped") ?? [];
+  const getTeamMemberList = (teamId: string) =>
+    [...teamMemberMap.entries()]
+      .filter(([, mappedTeamId]) => mappedTeamId === teamId)
+      .map(([studentId]) => ({
+        id: studentId,
+        name: studentNames[studentId] || "Unnamed Student",
+      }))
+      .sort((a, b) => a.name.localeCompare(b.name));
 
   const patchAssignment = async (updates: Record<string, unknown>) => {
     const { data: { session } } = await supabase.auth.getSession();
@@ -462,7 +464,7 @@ export function AssignmentCard({
         classId={classId}
         assignmentId={assignment.id}
         mode="educator"
-        teams={teams.map((team) => ({ id: team.id, name: team.name }))}
+        teams={assignmentTeams.map((team) => ({ id: team.id, name: team.name }))}
         className="mt-0"
       />
 
@@ -608,6 +610,19 @@ export function AssignmentCard({
         </p>
       )}
 
+      {drafts.length > 0 && onSwapDraft && onPublishDraftTeams ? (
+        <div className="rounded-xl border border-black/5 bg-background/50 p-4 dark:border-white/10">
+          <DraftTeamsBoard
+            classId={classId}
+            drafts={drafts}
+            studentsMap={studentsMap}
+            expectedMemberCount={expectedDraftMemberCount}
+            onSwap={onSwapDraft}
+            onPublish={onPublishDraftTeams}
+          />
+        </div>
+      ) : null}
+
       {assignmentTeams.length > 0 && (
         <div>
           <h3 className="text-sm font-semibold text-foreground">Generated teams</h3>
@@ -649,6 +664,24 @@ export function AssignmentCard({
                   </span>
                 </div>
                 <p className="mb-3 text-sm text-muted">{team.reason}</p>
+
+                {(() => {
+                  const members = getTeamMemberList(team.id);
+                  return members.length > 0 ? (
+                    <div className="mb-3 rounded-xl border border-black/5 bg-background/70 p-3 dark:border-white/10">
+                      <p className="text-xs font-semibold uppercase tracking-wide text-muted">Members</p>
+                      <ul className="mt-2 space-y-1">
+                        {members.map((member) => (
+                          <li key={member.id} className="text-sm text-foreground">
+                            {member.name}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  ) : (
+                    <p className="mb-3 text-xs text-muted">No members assigned yet.</p>
+                  );
+                })()}
 
                 {team.match_explanation?.factor_weights ? (
                   <div className="mb-4 rounded-xl border border-black/5 bg-background/70 p-3 dark:border-white/10">
@@ -706,60 +739,6 @@ export function AssignmentCard({
           </div>
         </div>
       )}
-
-      <div>
-        <div className="flex items-center justify-between gap-4">
-          <div>
-            <h3 className="text-sm font-semibold text-foreground">Survey responses</h3>
-            <p className="mt-1 text-sm text-muted">Profile survey answers grouped by team for this assignment.</p>
-          </div>
-          <p className="text-sm text-muted">
-            {completedResponses.length} of {surveyResponses.length} completed
-          </p>
-        </div>
-
-        {completedResponses.length === 0 ? (
-          <div className="mt-4 rounded-2xl border border-dashed border-black/15 bg-black/[0.02] p-6 text-center dark:border-white/20 dark:bg-white/[0.03]">
-            <p className="text-sm text-muted">No completed surveys yet for this class.</p>
-          </div>
-        ) : assignmentTeams.length > 0 ? (
-          <div className="mt-4 space-y-4">
-            {groupedTeams.map((teamGroup) =>
-              teamGroup.responses.length > 0 ? (
-                <section
-                  key={teamGroup.id}
-                  className="overflow-hidden rounded-2xl border border-black/6 bg-white shadow-sm dark:border-white/10 dark:bg-zinc-950"
-                >
-                  <div className="flex items-center justify-between gap-4 border-b border-black/10 bg-black/[0.04] px-4 py-3 dark:border-white/10 dark:bg-white/[0.06]">
-                    <div>
-                      <h4 className="text-sm font-semibold text-foreground">{teamGroup.name}</h4>
-                      <p className="text-xs text-muted">Team members with completed surveys</p>
-                    </div>
-                    <p className="text-sm text-muted">{teamGroup.responses.length} completed</p>
-                  </div>
-                  <SurveyTable responses={teamGroup.responses} />
-                </section>
-              ) : null,
-            )}
-            {ungroupedResponses.length > 0 && (
-              <section className="overflow-hidden rounded-2xl border border-black/6 bg-white shadow-sm dark:border-white/10 dark:bg-zinc-950">
-                <div className="flex items-center justify-between gap-4 border-b border-black/10 bg-black/[0.04] px-4 py-3 dark:border-white/10 dark:bg-white/[0.06]">
-                  <div>
-                    <h4 className="text-sm font-semibold text-foreground">Ungrouped students</h4>
-                    <p className="text-xs text-muted">Completed surveys without a team for this assignment</p>
-                  </div>
-                  <p className="text-sm text-muted">{ungroupedResponses.length} completed</p>
-                </div>
-                <SurveyTable responses={ungroupedResponses} />
-              </section>
-            )}
-          </div>
-        ) : (
-          <div className="mt-4 overflow-hidden rounded-2xl border border-black/6 bg-white shadow-sm dark:border-white/10 dark:bg-zinc-950">
-            <SurveyTable responses={completedResponses} />
-          </div>
-        )}
-      </div>
 
       <FeedbackAnalyticsPanel classId={classId} assignmentId={assignment.id} />
     </div>

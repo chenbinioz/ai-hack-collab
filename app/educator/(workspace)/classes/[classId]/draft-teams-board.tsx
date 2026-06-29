@@ -23,6 +23,16 @@ export interface DraftTeam {
   name: string;
   reason: string;
   members: string[];
+  assignment_id?: string | null;
+  match_explanation?: {
+    factor_weights?: Record<string, number>;
+    match_trace?: Array<{
+      factor?: string;
+      label?: string;
+      evidence?: string;
+      weight?: number;
+    }>;
+  } | null;
 }
 
 export interface StudentStats {
@@ -37,11 +47,12 @@ interface DraftTeamsBoardProps {
   classId: string;
   drafts: DraftTeam[];
   studentsMap: Record<string, StudentStats>;
+  expectedMemberCount?: number;
   onSwap: (studentId: string, fromDraftId: string, toDraftId: string, reason: string) => Promise<void>;
   onPublish: () => Promise<void>;
 }
 
-export function DraftTeamsBoard({ classId, drafts, studentsMap, onSwap, onPublish }: DraftTeamsBoardProps) {
+export function DraftTeamsBoard({ classId, drafts, studentsMap, expectedMemberCount, onSwap, onPublish }: DraftTeamsBoardProps) {
   const [activeStudentId, setActiveStudentId] = useState<string | null>(null);
   const [swapModalOpen, setSwapModalOpen] = useState(false);
   const [pendingSwap, setPendingSwap] = useState<{ studentId: string; fromDraftId: string; toDraftId: string } | null>(null);
@@ -109,6 +120,10 @@ export function DraftTeamsBoard({ classId, drafts, studentsMap, onSwap, onPublis
     }
   };
 
+  const totalAssigned = drafts.reduce((sum, draft) => sum + draft.members.length, 0);
+  const totalStudents = expectedMemberCount ?? Object.keys(studentsMap).length;
+  const hasUnassigned = totalAssigned < totalStudents;
+
   return (
     <div className="space-y-6">
       <div className="flex justify-between items-center bg-brand/10 p-4 rounded-xl border border-brand/20">
@@ -117,6 +132,14 @@ export function DraftTeamsBoard({ classId, drafts, studentsMap, onSwap, onPublis
           <p className="text-sm text-brand/80">
             Review AI matches. Drag and drop to adjust.
           </p>
+          <p className="text-xs text-brand/70 mt-1">
+            {totalAssigned} of {totalStudents} students assigned across {drafts.length} teams
+          </p>
+          {hasUnassigned && (
+            <p className="text-xs text-amber-700 dark:text-amber-300 mt-1">
+              Some students are missing from drafts. Regenerate teams to reassign everyone.
+            </p>
+          )}
         </div>
         <button
           onClick={publishTeams}
@@ -170,6 +193,104 @@ export function DraftTeamsBoard({ classId, drafts, studentsMap, onSwap, onPublis
   );
 }
 
+function formatFactorLabel(factor: string) {
+  const factorLabelMap: Record<string, string> = {
+    deadline_preference: "Deadline management",
+    discussion_preference: "Discussion style",
+    critical_feedback_preference: "Comfort with critical feedback",
+    disagreement_preference: "Conflict handling",
+    new_concepts_preference: "Openness to new concepts",
+    teammate_work_preference: "Preferred work distribution",
+    deadline_working_pattern: "Deadline work rhythm",
+    previous_experience: "Previous subject experience",
+    skills: "Relevant skills",
+    working_style: "Working style",
+    availability: "Scheduling compatibility",
+    diversity: "Team diversity",
+  };
+
+  return (
+    factorLabelMap[factor] ??
+    factor
+      .split("_")
+      .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+      .join(" ")
+  );
+}
+
+function sortedFactorWeights(weights?: Record<string, number>) {
+  if (!weights) {
+    return [] as Array<[string, number]>;
+  }
+  return Object.entries(weights).sort(([, a], [, b]) => b - a);
+}
+
+function DraftMatchExplanation({ draft }: { draft: DraftTeam }) {
+  const hasTrace = (draft.match_explanation?.match_trace?.length ?? 0) > 0;
+  const hasWeights = Boolean(draft.match_explanation?.factor_weights);
+
+  if (!draft.reason && !hasTrace && !hasWeights) {
+    return null;
+  }
+
+  return (
+    <div className="mt-2 space-y-3 max-h-72 overflow-y-auto pr-1">
+      {draft.reason ? (
+        <div className="rounded-xl border border-black/5 bg-background/70 p-3 dark:border-white/10">
+          <p className="text-xs font-semibold uppercase tracking-wide text-muted">AI summary</p>
+          <p className="mt-2 text-xs leading-relaxed text-foreground whitespace-pre-wrap">{draft.reason}</p>
+        </div>
+      ) : null}
+
+      {hasWeights ? (
+        <div className="rounded-xl border border-black/5 bg-background/70 p-3 dark:border-white/10">
+          <p className="text-xs font-semibold uppercase tracking-wide text-muted">Factor weights</p>
+          <div className="mt-3 space-y-2">
+            {sortedFactorWeights(draft.match_explanation?.factor_weights).map(([factor, weight]) => {
+              const percentage = Math.max(0, Math.min(100, Math.round(weight * 100)));
+              return (
+                <div key={factor}>
+                  <div className="mb-1 flex items-center justify-between text-xs text-muted">
+                    <span>{formatFactorLabel(factor)}</span>
+                    <span>{percentage}%</span>
+                  </div>
+                  <div className="h-2 overflow-hidden rounded-full bg-black/10 dark:bg-white/10">
+                    <div className="h-full rounded-full bg-brand" style={{ width: `${percentage}%` }} />
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      ) : null}
+
+      {hasTrace ? (
+        <div className="rounded-xl border border-black/5 bg-background/70 p-3 dark:border-white/10">
+          <p className="text-xs font-semibold uppercase tracking-wide text-muted">Why matched</p>
+          <ul className="mt-2 space-y-2">
+            {draft.match_explanation?.match_trace?.map((trace, index) => (
+              <li
+                key={`${draft.id}-trace-${index}`}
+                className="rounded-lg bg-black/[0.03] px-2.5 py-2 text-xs text-foreground dark:bg-white/[0.05]"
+              >
+                <span className="font-semibold">
+                  {trace.label
+                    ? formatFactorLabel(trace.label)
+                    : trace.factor
+                      ? formatFactorLabel(trace.factor)
+                      : `Signal ${index + 1}`}
+                  :
+                </span>{" "}
+                <span className="leading-relaxed">{trace.evidence || "No detailed evidence provided."}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 function TeamColumn({ draft, studentsMap }: { draft: DraftTeam, studentsMap: Record<string, StudentStats> }) {
   const { setNodeRef } = useSortable({ id: draft.id });
 
@@ -182,16 +303,15 @@ function TeamColumn({ draft, studentsMap }: { draft: DraftTeam, studentsMap: Rec
   return (
     <div
       ref={setNodeRef}
-      className="flex-shrink-0 w-80 rounded-2xl bg-black/[0.02] dark:bg-white/[0.02] border border-black/10 dark:border-white/10 p-4 snap-center flex flex-col"
+      className="flex-shrink-0 w-96 rounded-2xl bg-black/[0.02] dark:bg-white/[0.02] border border-black/10 dark:border-white/10 p-4 snap-center flex flex-col max-h-[85vh]"
     >
-      <div className="mb-4 flex justify-between items-start">
-        <div>
+      <div className="mb-4 flex justify-between items-start gap-3">
+        <div className="min-w-0 flex-1">
           <h4 className="font-semibold text-foreground">{draft.name}</h4>
-          <p className="text-xs text-muted mt-1 max-w-[200px] line-clamp-2" title={draft.reason}>
-            {draft.reason}
-          </p>
+          <p className="text-xs text-muted mt-0.5">{draft.members.length} members</p>
+          <DraftMatchExplanation draft={draft} />
         </div>
-        <div className="text-right">
+        <div className="text-right shrink-0">
           <div className="text-xs font-mono text-brand bg-brand/10 px-2 py-1 rounded">
             Avg Code: {avgCoding.toFixed(1)}
           </div>
@@ -199,7 +319,7 @@ function TeamColumn({ draft, studentsMap }: { draft: DraftTeam, studentsMap: Rec
       </div>
 
       <SortableContext items={draft.members} strategy={rectSortingStrategy}>
-        <div className="space-y-3 flex-grow min-h-[150px]">
+        <div className="space-y-3 flex-grow min-h-[150px] overflow-y-auto">
           {draft.members.map((memberId) => (
             <StudentCard key={memberId} id={memberId} student={studentsMap[memberId]} />
           ))}

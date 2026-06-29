@@ -496,8 +496,8 @@ def _chunk_students_for_ideal_size(student_ids, ideal_team_size):
     return teams
 
 
-def _enforce_ideal_team_sizes(matches, ideal_team_size):
-    """Rebalance AI groups when they do not match the configured ideal team size."""
+def _enforce_ideal_team_sizes(matches, ideal_team_size, all_student_ids=None):
+    """Rebalance AI groups so every known student is assigned once at the ideal team size."""
     if not isinstance(matches, dict) or not ideal_team_size or ideal_team_size < 2:
         return matches
 
@@ -505,26 +505,66 @@ def _enforce_ideal_team_sizes(matches, ideal_team_size):
     if not isinstance(groups, list) or not groups:
         return matches
 
-    all_members = []
+    def _valid_id(student_id):
+        return isinstance(student_id, str) and len(student_id) == 36
+
+    known_ids = [
+        student_id
+        for student_id in (all_student_ids or [])
+        if _valid_id(student_id)
+    ]
+    known_set = set(known_ids)
+
     template_reason = "Grouped to match the configured ideal team size."
     template_trace = []
+    group_reasons = []
 
     for group in groups:
         if not isinstance(group, dict):
             continue
-        for member in group.get("members", []):
-            if isinstance(member, str) and member not in all_members:
-                all_members.append(member)
         if group.get("reason"):
-            template_reason = group["reason"]
+            group_reasons.append(group["reason"])
+            if template_reason == "Grouped to match the configured ideal team size.":
+                template_reason = group["reason"]
         if group.get("match_trace") and not template_trace:
             template_trace = group["match_trace"]
+
+    if known_ids:
+        ai_ordered = []
+        for group in groups:
+            if not isinstance(group, dict):
+                continue
+            for member in group.get("members", []):
+                if member in known_set and member not in ai_ordered:
+                    ai_ordered.append(member)
+        missing = [student_id for student_id in known_ids if student_id not in ai_ordered]
+        all_members = ai_ordered + missing
+    else:
+        all_members = []
+        for group in groups:
+            if not isinstance(group, dict):
+                continue
+            for member in group.get("members", []):
+                if _valid_id(member) and member not in all_members:
+                    all_members.append(member)
 
     if not all_members:
         return matches
 
+    if known_ids:
+        chunks = _chunk_students_for_ideal_size(all_members, ideal_team_size)
+        matches["groups"] = [
+            {
+                "members": chunk,
+                "reason": group_reasons[i] if i < len(group_reasons) else template_reason,
+                "match_trace": template_trace,
+            }
+            for i, chunk in enumerate(chunks)
+        ]
+        return matches
+
     current_sizes = [
-        len(group.get("members", []))
+        len([member for member in group.get("members", []) if _valid_id(member)])
         for group in groups
         if isinstance(group, dict)
     ]
@@ -539,10 +579,10 @@ def _enforce_ideal_team_sizes(matches, ideal_team_size):
     matches["groups"] = [
         {
             "members": chunk,
-            "reason": template_reason,
+            "reason": group_reasons[i] if i < len(group_reasons) else template_reason,
             "match_trace": template_trace,
         }
-        for chunk in chunks
+        for i, chunk in enumerate(chunks)
     ]
     return matches
 
@@ -915,7 +955,12 @@ def match_students(students, ai_preferences=None, class_context=None):
         parsed = _parse_model_json_response(response_json)
         normalized = _normalize_matches(parsed, ai_preferences)
         ideal_team_size = class_context.get("ideal_team_size") or class_context.get("max_team_size")
-        enforced = _enforce_ideal_team_sizes(normalized, ideal_team_size)
+        roster_ids = [student.get("id") for student in students if student.get("id")]
+        enforced = _enforce_ideal_team_sizes(
+            normalized,
+            ideal_team_size,
+            all_student_ids=roster_ids,
+        )
         return enforced
     except RuntimeError as e:
         return {"error": f"AI Matching failed: {e}"}
