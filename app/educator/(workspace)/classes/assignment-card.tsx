@@ -272,6 +272,22 @@ export function AssignmentCard({
     }
   };
 
+  const getApiErrorMessage = (payload: any) => {
+    if (!payload) {
+      return null;
+    }
+
+    if (typeof payload.detail === "string") {
+      return payload.detail;
+    }
+
+    if (payload.detail && typeof payload.detail === "object") {
+      return payload.detail.error || payload.detail.redirect_endpoint || JSON.stringify(payload.detail);
+    }
+
+    return payload.error || null;
+  };
+
   const handleGenerateTeams = async () => {
     try {
       setIsGeneratingTeams(true);
@@ -294,11 +310,12 @@ export function AssignmentCard({
       );
 
       const payload = await response.json().catch(() => ({}));
-      if (payload?.error || payload?.detail) {
-        throw new Error(payload.detail || payload.error);
+      const apiError = getApiErrorMessage(payload);
+      if (apiError) {
+        throw new Error(apiError);
       }
       if (!response.ok) {
-        throw new Error(payload?.detail || payload?.error || "Failed to generate teams");
+        throw new Error(apiError || "Failed to generate teams");
       }
 
       onRefresh();

@@ -287,10 +287,13 @@ export function FeedbackAnalyticsPanel({ classId, assignmentId }: FeedbackAnalyt
               const data = ratingTimeMap.get(rating);
               const avg = data && data.count > 0 ? Math.round(data.totalSeconds / data.count) : 0;
               return (
-                <div key={rating} className="rounded-2xl border border-black/5 bg-white p-3 text-center text-sm">
-                  <div className="font-semibold">{rating}</div>
-                  <div className="text-xs text-muted">{avg}s avg</div>
-                  <div className="text-xs text-muted">{data ? data.count : 0} samples</div>
+                <div
+                  key={rating}
+                  className="rounded-2xl border border-black/5 bg-white p-3 text-center text-sm dark:bg-zinc-950 dark:border-white/10 dark:text-white"
+                >
+                  <div className="font-semibold dark:text-white">{rating}</div>
+                  <div className="text-xs text-muted dark:text-white/70">{avg}s avg</div>
+                  <div className="text-xs text-muted dark:text-white/70">{data ? data.count : 0} samples</div>
                 </div>
               );
             })}
