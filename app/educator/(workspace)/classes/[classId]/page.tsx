@@ -1,5 +1,7 @@
 "use client";
 
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+
 import { useState, useEffect } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { createStudentBrowserClient } from "@/lib/supabase/student-browser-client";
@@ -10,6 +12,7 @@ import {
 } from "@/app/educator/(workspace)/classes/assignment-card";
 import { CreateAssignmentModal } from "@/app/educator/(workspace)/classes/create-assignment-modal";
 import { ClassFeedbackOverview } from "@/app/educator/(workspace)/classes/class-feedback-overview";
+import { DraftTeamsBoard, DraftTeam } from "./draft-teams-board";
 
 interface ClassDetails {
   id: string;
@@ -60,6 +63,7 @@ export default function ClassManagementPage() {
   const [enrolledStudents, setEnrolledStudents] = useState<EnrolledStudent[]>([]);
   const [teams, setTeams] = useState<Team[]>([]);
   const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
+  const [drafts, setDrafts] = useState<DraftTeam[]>([]);
   const [surveyResponses, setSurveyResponses] = useState<SurveyResponse[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -226,6 +230,28 @@ export default function ClassManagementPage() {
       } else {
         setTeamMembers([]);
       }
+      // Fetch draft teams for this class (best-effort: don't block page if backend is down)
+      try {
+        const draftController = new AbortController();
+        const draftTimeout = setTimeout(() => draftController.abort(), 5000);
+        const draftsResponse = await fetch(`${API_BASE_URL}/educator/classes/${classId}/draft-teams`, {
+          headers: {
+            Authorization: `Bearer ${session.access_token}`,
+          },
+          signal: draftController.signal,
+        });
+        clearTimeout(draftTimeout);
+        if (draftsResponse.ok) {
+          const draftsData = await draftsResponse.json();
+          setDrafts(draftsData.drafts || []);
+        }
+      } catch (draftErr: any) {
+        // Backend may not be running — silently ignore, drafts just won't show
+        if (draftErr.name !== "AbortError") {
+          console.warn("Could not fetch draft teams (is the backend running?):", draftErr.message);
+        }
+      }
+
     } catch (err: any) {
       console.error("Error fetching class data:", err);
       setError(err.message || "Failed to load class data");
@@ -235,6 +261,8 @@ export default function ClassManagementPage() {
       }
     }
   };
+
+  const completedResponses = surveyResponses.filter((r) => r.survey_completed);
 
   const getTeamMemberMap = (assignmentId: string) => {
     const map = new Map<string, string>();
@@ -257,6 +285,74 @@ export default function ClassManagementPage() {
       ...prev.filter((member) => member.assignment_id !== assignmentId),
       ...newMembers,
     ]);
+  };
+
+  const getApiErrorMessage = (payload: unknown) => {
+    if (!payload || typeof payload !== "object") {
+      return null;
+    }
+
+    const record = payload as { detail?: unknown; error?: unknown };
+    if (typeof record.detail === "string") {
+      return record.detail;
+    }
+
+    if (record.detail && typeof record.detail === "object") {
+      const detail = record.detail as { error?: unknown; redirect_endpoint?: unknown };
+      if (typeof detail.error === "string") {
+        return detail.error;
+      }
+      if (detail.redirect_endpoint) {
+        return JSON.stringify(detail);
+      }
+    }
+
+    return typeof record.error === "string" ? record.error : null;
+  };
+
+  const handleSwapDraft = async (studentId: string, fromDraftId: string, toDraftId: string, reason: string) => {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) return;
+    const response = await fetch(`${API_BASE_URL}/educator/classes/${classId}/draft-teams/swap`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${session.access_token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        student_id: studentId,
+        from_draft_team_id: fromDraftId,
+        to_draft_team_id: toDraftId,
+        reason: reason,
+      }),
+    });
+    if (!response.ok) throw new Error("Swap failed");
+    await fetchClassData();
+  };
+
+  const handlePublishTeams = async () => {
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) throw new Error("Not authenticated");
+
+      const response = await fetch(`${API_BASE_URL}/educator/classes/${classId}/publish-teams`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${session.access_token}`,
+        },
+      });
+
+      const payload = await response.json().catch(() => ({}));
+      const apiError = getApiErrorMessage(payload);
+      if (apiError) throw new Error(apiError);
+      if (!response.ok) throw new Error(apiError || "Publish failed");
+
+      await fetchClassData();
+    } catch (err: any) {
+      console.error("Error publishing teams:", err);
+      setError(err.message || "Failed to publish teams");
+      throw err;
+    }
   };
 
   if (isLoading) {
@@ -345,6 +441,55 @@ export default function ClassManagementPage() {
           >
             Add Assignment
           </button>
+        </div>
+
+        {enrolledStudents.length < 2 && (
+          <p className="mt-2 text-sm text-amber-600 dark:text-amber-400">
+            Need at least 2 students enrolled to generate teams.
+          </p>
+        )}
+
+        {error && (
+          <p className="mt-3 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-800 dark:bg-red-950/30 dark:text-red-300">
+            {error}
+          </p>
+        )}
+
+        <div className="mt-8">
+          <ClassFeedbackOverview classId={classId} />
+        </div>
+      </div>
+
+      {/* Draft Teams Section */}
+      {drafts.length > 0 && (
+        <div className="rounded-2xl border border-black/10 bg-surface p-6 shadow-sm dark:border-white/10 mt-8">
+          <DraftTeamsBoard
+            classId={classId}
+            drafts={drafts}
+            studentsMap={
+              Object.fromEntries(surveyResponses.map(r => [
+                r.student_id,
+                { id: r.student_id, name: r.name, email: r.email, workload: r.survey_approach_heavy_workload, coding: r.survey_confidence_coding }
+              ]))
+            }
+            onSwap={handleSwapDraft}
+            onPublish={handlePublishTeams}
+          />
+        </div>
+      )}
+
+      {/* Class Survey Responses */}
+      <div className="rounded-2xl border border-black/10 bg-surface p-6 shadow-sm dark:border-white/10">
+        <div className="flex items-center justify-between gap-4">
+          <div>
+            <h2 className="text-lg font-semibold text-foreground">Class survey responses</h2>
+            <p className="mt-2 text-sm text-muted">
+              Student profile survey answers for the current class only.
+            </p>
+          </div>
+          <p className="text-sm text-muted">
+            {completedResponses.length} of {surveyResponses.length} completed
+          </p>
         </div>
 
         {assignments.length === 0 ? (
@@ -436,8 +581,6 @@ export default function ClassManagementPage() {
         )}
       </div>
 
-      <ClassFeedbackOverview classId={classId} />
-
       {showCreateAssignmentModal && (
         <CreateAssignmentModal
           classId={classId}
@@ -449,5 +592,5 @@ export default function ClassManagementPage() {
         />
       )}
     </div>
-  );
+  )
 }

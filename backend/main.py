@@ -6,7 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from supabase import create_client
 
-from database import init_db, save_student, get_all_students, get_all_teams, save_teams, reset_matches, supabase, compute_collaboration_balance_for_teams
+from database import init_db, save_student, get_all_students, get_all_teams, save_teams, reset_matches, supabase, compute_collaboration_balance_for_teams, save_team_drafts, publish_team_drafts
 from matcher import match_students
 
 app = FastAPI()
@@ -927,34 +927,6 @@ def generate_assignment_teams(class_id: str, assignment_id: str, request: Reques
             ideal_team_size = max(2, min(10, int(ideal_team_size)))
         except (TypeError, ValueError):
             ideal_team_size = 3
-        # #region agent log
-        try:
-            import json as _json
-            from pathlib import Path as _Path
-            with (_Path(__file__).resolve().parent.parent / ".cursor" / "debug-a3dd45.log").open(
-                "a", encoding="utf-8"
-            ) as log_file:
-                log_file.write(
-                    _json.dumps(
-                        {
-                            "sessionId": "a3dd45",
-                            "timestamp": int(__import__("time").time() * 1000),
-                            "location": "main.py:generate_assignment_teams",
-                            "message": "Ideal team size for generation",
-                            "data": {
-                                "assignment_id": assignment_id,
-                                "ideal_team_size": ideal_team_size,
-                                "assignment_ideal_team_size": assignment_data.get("ideal_team_size"),
-                                "assignment_max_team_size": assignment_data.get("max_team_size"),
-                            },
-                            "hypothesisId": "H1,H2",
-                        }
-                    )
-                    + "\n"
-                )
-        except Exception:
-            pass
-        # #endregion
         class_context = {
             "coursework_deadline": assignment_data.get("due_date"),
             "project_goal_hint": assignment_goal_hint,
@@ -971,49 +943,53 @@ def generate_assignment_teams(class_id: str, assignment_id: str, request: Reques
         if isinstance(matches, dict) and "error" in matches:
             return matches
 
-        existing_teams_result = admin_supabase.table("teams").select("id").eq(
-            "assignment_id", assignment_id
-        ).execute()
-        existing_team_ids = [
-            team["id"] for team in (existing_teams_result.data or []) if team.get("id")
-        ]
+        # Remove any existing draft teams for this class before generating a fresh draft.
+        try:
+            admin_supabase.table("team_drafts").delete().eq("class_id", class_id).execute()
+        except Exception as del_err:
+            print(f"Warning: Failed to delete old draft teams: {del_err}")
 
+        # Save draft teams with class_id
         if "groups" in matches:
             for group in matches["groups"]:
                 group["class_id"] = class_id
-                group["assignment_id"] = assignment_id
 
-        save_result = save_teams(
+        created_draft_ids = save_team_drafts(
             matches,
             class_id,
-            ideal_team_size=ideal_team_size,
+            max_team_size=ideal_team_size,
             assignment_id=assignment_id,
-        ) or {"created_team_ids": [], "team_size_report": None}
-        created_team_ids = save_result.get("created_team_ids", [])
-        team_size_report = save_result.get("team_size_report")
+            db_client=admin_supabase,
+        ) or []
 
-        if existing_team_ids:
-            stale_team_ids = [tid for tid in existing_team_ids if tid not in created_team_ids]
-            if stale_team_ids:
-                try:
-                    admin_supabase.table("teams").delete().in_("id", stale_team_ids).execute()
-                except Exception as del_err:
-                    print(f"Warning: Failed to delete old teams: {del_err}")
-
-        teams_result = admin_supabase.table("teams").select("*").eq(
-            "assignment_id", assignment_id
-        ).order("created_at").execute()
-        members_result = admin_supabase.table("team_members").select(
-            "student_id, team_id, assignment_id"
-        ).eq("assignment_id", assignment_id).execute()
+        team_size_report = None
+        groups = matches.get("groups", []) if isinstance(matches, dict) else []
+        if groups and ideal_team_size is not None:
+            team_size_entries = []
+            non_ideal_teams = []
+            for idx, group in enumerate(groups, start=1):
+                members = group.get("members", [])
+                valid_members = [m for m in members if isinstance(m, str) and len(m) == 36]
+                size = len(valid_members)
+                is_ideal = size == ideal_team_size
+                team_size_entries.append({"team_index": idx, "size": size, "is_ideal": is_ideal})
+                if not is_ideal:
+                    non_ideal_teams.append(
+                        {"team_index": idx, "size": size, "delta": size - ideal_team_size}
+                    )
+            team_size_report = {
+                "ideal_team_size": ideal_team_size,
+                "all_ideal": len(non_ideal_teams) == 0,
+                "teams": team_size_entries,
+                "non_ideal_teams": non_ideal_teams,
+            }
 
         return {
             "matches": matches,
             "class_id": class_id,
             "assignment_id": assignment_id,
+            "draft_team_ids": created_draft_ids,
             "team_size_report": team_size_report,
-            "teams": teams_result.data or [],
-            "team_members": members_result.data or [],
         }
 
     except Exception as e:
@@ -1036,3 +1012,150 @@ def get_all_teams():
     except Exception as e:
         print(f"Supabase Teams Error: {e}")
         return []
+
+class SwapStudentRequest(BaseModel):
+    student_id: str
+    from_draft_team_id: str
+    to_draft_team_id: str
+    reason: str
+
+@app.get("/educator/classes/{class_id}/draft-teams")
+def get_draft_teams(class_id: str, request: Request):
+    if not supabase:
+        return {"error": "Database not configured"}
+
+    try:
+        auth_header = request.headers.get("Authorization")
+        if not auth_header or not auth_header.startswith("Bearer "):
+            return {"error": "Not authenticated"}
+
+        token = auth_header.replace("Bearer ", "")
+        temp_supabase = create_client(
+            os.getenv("SUPABASE_URL"),
+            os.getenv("SUPABASE_SERVICE_ROLE_KEY") or os.getenv("SUPABASE_ANON_KEY")
+        )
+
+        user_response = temp_supabase.auth.get_user(token)
+        if not user_response.user:
+            return {"error": "Invalid token"}
+
+        educator_id = str(user_response.user.id)
+
+        # Check authorization
+        class_res = supabase.table("classes").select("id").eq("id", class_id).eq("educator_id", educator_id).execute()
+        if not class_res.data:
+            return {"error": "Access denied"}
+
+        drafts_res = supabase.table("team_drafts").select("*").eq("class_id", class_id).order("created_at", desc=False).execute()
+        drafts = drafts_res.data or []
+
+        for draft in drafts:
+            members_res = supabase.table("team_draft_members").select("student_id").eq("draft_team_id", draft["id"]).execute()
+            member_ids = [m["student_id"] for m in (members_res.data or [])]
+            draft["members"] = member_ids
+
+        return {"drafts": drafts}
+    except Exception as e:
+        print(f"Error fetching draft teams: {e}")
+        return {"error": str(e)}
+
+@app.post("/educator/classes/{class_id}/draft-teams/swap")
+def swap_draft_team_student(class_id: str, swap_req: SwapStudentRequest, request: Request):
+    if not supabase:
+        return {"error": "Database not configured"}
+
+    try:
+        auth_header = request.headers.get("Authorization")
+        if not auth_header or not auth_header.startswith("Bearer "):
+            return {"error": "Not authenticated"}
+
+        token = auth_header.replace("Bearer ", "")
+        admin_supabase = create_client(
+            os.getenv("SUPABASE_URL"),
+            os.getenv("SUPABASE_SERVICE_ROLE_KEY") or os.getenv("SUPABASE_ANON_KEY")
+        )
+
+        user_response = admin_supabase.auth.get_user(token)
+        if not user_response.user:
+            return {"error": "Invalid token"}
+
+        educator_id = str(user_response.user.id)
+
+        # Check authorization
+        class_res = admin_supabase.table("classes").select("id").eq("id", class_id).eq("educator_id", educator_id).execute()
+        if not class_res.data:
+            return {"error": "Access denied"}
+
+        # Perform the swap
+        # 1. Update team_draft_members
+        admin_supabase.table("team_draft_members").update({"draft_team_id": swap_req.to_draft_team_id}).eq("draft_team_id", swap_req.from_draft_team_id).eq("student_id", swap_req.student_id).execute()
+
+        # 2. Log manual intervention
+        intervention = {
+            "class_id": class_id,
+            "teacher_id": educator_id,
+            "student_id": swap_req.student_id,
+            "from_team_id": swap_req.from_draft_team_id,
+            "to_team_id": swap_req.to_draft_team_id,
+            "reason": swap_req.reason
+        }
+        admin_supabase.table("manual_intervention_logs").insert(intervention).execute()
+
+        # 3. Regenerate reason (Mocked logic for speed, can be enhanced with LLM call)
+        # Fetch updated members of 'to' team
+        to_members_res = admin_supabase.table("team_draft_members").select("student_id").eq("draft_team_id", swap_req.to_draft_team_id).execute()
+        if to_members_res.data:
+            to_members = [m["student_id"] for m in to_members_res.data]
+            from matcher import match_students # Can reuse logic or just write a small prompt
+            # For this MVP, we just update the reason text slightly to indicate a manual change.
+            admin_supabase.table("team_drafts").update({
+                "reason": f"Manually updated team. Reason: {swap_req.reason}"
+            }).eq("id", swap_req.to_draft_team_id).execute()
+            
+            admin_supabase.table("team_drafts").update({
+                "reason": "Manually updated team. Member removed."
+            }).eq("id", swap_req.from_draft_team_id).execute()
+
+        return {"success": True}
+    except Exception as e:
+        print(f"Error swapping student: {e}")
+        return {"error": str(e)}
+
+@app.post("/educator/classes/{class_id}/publish-teams")
+def publish_class_teams(class_id: str, request: Request):
+    if not supabase:
+        return {"error": "Database not configured"}
+
+    try:
+        auth_header = request.headers.get("Authorization")
+        if not auth_header or not auth_header.startswith("Bearer "):
+            return {"error": "Not authenticated"}
+
+        token = auth_header.replace("Bearer ", "")
+        temp_supabase = create_client(
+            os.getenv("SUPABASE_URL"),
+            os.getenv("SUPABASE_SERVICE_ROLE_KEY") or os.getenv("SUPABASE_ANON_KEY")
+        )
+
+        user_response = temp_supabase.auth.get_user(token)
+        if not user_response.user:
+            return {"error": "Invalid token"}
+
+        educator_id = str(user_response.user.id)
+
+        # Check authorization
+        class_res = supabase.table("classes").select("id").eq("id", class_id).eq("educator_id", educator_id).execute()
+        if not class_res.data:
+            return {"error": "Access denied"}
+
+        # Use a service-role admin client to bypass RLS and perform publish
+        admin_supabase = create_client(os.getenv("SUPABASE_URL"), os.getenv("SUPABASE_SERVICE_ROLE_KEY"))
+        publish_result = publish_team_drafts(class_id, db_client=admin_supabase)
+        if isinstance(publish_result, dict) and publish_result.get("success"):
+            return {"success": True, "created_team_ids": publish_result.get("created_team_ids", [])}
+        else:
+            err = publish_result.get("error") if isinstance(publish_result, dict) else None
+            return {"error": err or "Failed to publish teams or no drafts found"}
+    except Exception as e:
+        print(f"Error publishing teams: {e}")
+        return {"error": str(e)}

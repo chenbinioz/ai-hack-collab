@@ -11,6 +11,7 @@ import {
   type AiPreferences,
 } from "@/lib/matching/skill-preferences";
 import { AssignmentAttachmentsPanel } from "./assignment-attachments-panel";
+import { AssignmentProgressTracker } from "@/components/assignment-progress-tracker";
 
 export interface Assignment {
   id: string;
@@ -148,6 +149,16 @@ function sortedFactorWeights(weights?: Record<string, number>) {
   return Object.entries(weights)
     .filter((entry) => Number.isFinite(entry[1]))
     .sort((a, b) => b[1] - a[1]);
+}
+
+function getErrorMessage(error: unknown, fallback: string) {
+  if (error instanceof Error) {
+    return error.message || fallback;
+  }
+  if (typeof error === "object" && error !== null && "message" in error) {
+    return String((error as { message?: unknown }).message ?? fallback);
+  }
+  return fallback;
 }
 
 function SurveyTable({ responses }: { responses: SurveyResponse[] }) {
@@ -294,8 +305,8 @@ export function AssignmentCard({
       setError(null);
       await patchAssignment({ due_date: dueDateInput || null });
       await onRefresh({ silent: true });
-    } catch (err: any) {
-      setError(err.message || "Failed to update due date");
+    } catch (err: unknown) {
+      setError(getErrorMessage(err, "Failed to update due date"));
     } finally {
       setIsSavingDueDate(false);
     }
@@ -310,11 +321,27 @@ export function AssignmentCard({
         ai_preferences: aiPreferences,
       });
       await onRefresh({ silent: true });
-    } catch (err: any) {
-      setError(err.message || "Failed to update team settings");
+    } catch (err: unknown) {
+      setError(getErrorMessage(err, "Failed to update team settings"));
     } finally {
       setIsSavingTeamSettings(false);
     }
+  };
+
+  const getApiErrorMessage = (payload: any) => {
+    if (!payload) {
+      return null;
+    }
+
+    if (typeof payload.detail === "string") {
+      return payload.detail;
+    }
+
+    if (payload.detail && typeof payload.detail === "object") {
+      return payload.detail.error || payload.detail.redirect_endpoint || JSON.stringify(payload.detail);
+    }
+
+    return payload.error || null;
   };
 
   const handleGenerateTeams = async () => {
@@ -332,21 +359,6 @@ export function AssignmentCard({
         ideal_team_size: idealTeamSize,
         ai_preferences: aiPreferences,
       });
-
-      // #region agent log
-      fetch("http://127.0.0.1:7309/ingest/b939d864-31de-4933-a1c2-ecb2537c7bfd", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "a3dd45" },
-        body: JSON.stringify({
-          sessionId: "a3dd45",
-          location: "assignment-card.tsx:generate-teams:settings",
-          message: "Saved team settings before generate",
-          data: { assignmentId: assignment.id, idealTeamSize },
-          timestamp: Date.now(),
-          hypothesisId: "H1,H2",
-        }),
-      }).catch(() => {});
-      // #endregion
 
       const targetUrl = `/api/educator/classes/${classId}/assignments/${assignment.id}/generate-teams`;
 
@@ -414,8 +426,8 @@ export function AssignmentCard({
 
       setGenerationSizeReport(null);
       await onRefresh({ silent: true });
-    } catch (err: any) {
-      setError(err.message || "Failed to reset teams");
+    } catch (err: unknown) {
+      setError(getErrorMessage(err, "Failed to reset teams"));
     } finally {
       setIsResettingTeams(false);
     }
@@ -445,6 +457,14 @@ export function AssignmentCard({
           mode="manage"
         />
       </div>
+
+      <AssignmentProgressTracker
+        classId={classId}
+        assignmentId={assignment.id}
+        mode="educator"
+        teams={teams.map((team) => ({ id: team.id, name: team.name }))}
+        className="mt-0"
+      />
 
       <div className="flex flex-col gap-3 sm:max-w-md">
         <label htmlFor={`due_date_${assignment.id}`} className="text-sm font-medium text-foreground">

@@ -916,34 +916,6 @@ def match_students(students, ai_preferences=None, class_context=None):
         normalized = _normalize_matches(parsed, ai_preferences)
         ideal_team_size = class_context.get("ideal_team_size") or class_context.get("max_team_size")
         enforced = _enforce_ideal_team_sizes(normalized, ideal_team_size)
-        # #region agent log
-        try:
-            sizes = [
-                len(group.get("members", []))
-                for group in enforced.get("groups", [])
-                if isinstance(group, dict)
-            ]
-            with (PROJECT_ROOT / ".cursor" / "debug-a3dd45.log").open("a", encoding="utf-8") as log_file:
-                log_file.write(
-                    json.dumps(
-                        {
-                            "sessionId": "a3dd45",
-                            "timestamp": int(time.time() * 1000),
-                            "location": "matcher.py:match_students",
-                            "message": "Team sizes after enforcement",
-                            "data": {
-                                "ideal_team_size": ideal_team_size,
-                                "team_sizes": sizes,
-                                "team_count": len(sizes),
-                            },
-                            "hypothesisId": "H3,H4",
-                        }
-                    )
-                    + "\n"
-                )
-        except Exception:
-            pass
-        # #endregion
         return enforced
     except RuntimeError as e:
         return {"error": f"AI Matching failed: {e}"}

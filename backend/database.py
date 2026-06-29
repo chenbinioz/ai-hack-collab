@@ -196,6 +196,135 @@ def save_teams(matches_parsed, class_id=None, ideal_team_size=None, assignment_i
         "team_size_report": team_size_report,
     }
 
+def save_team_drafts(matches_parsed, class_id=None, max_team_size=None, assignment_id=None, db_client=None):
+    db = db_client or supabase
+    if not db:
+        print("Error: Supabase client is not initialized.")
+        return []
+
+    groups = matches_parsed.get("groups", [])
+    factor_weights = matches_parsed.get("factor_weights", {})
+    if not groups:
+        return []
+        
+    created_team_ids = []
+    
+    for idx, group in enumerate(groups, start=1):
+        reason = group.get("reason", "")
+        members = group.get("members", [])
+        match_trace = group.get("match_trace", [])
+        group_class_id = group.get("class_id", class_id)
+        group_assignment_id = group.get("assignment_id", assignment_id)
+        
+        valid_members = [m for m in members if isinstance(m, str) and len(m) == 36]
+        if not valid_members:
+            continue
+            
+        team_insert = {
+            "name": f"Team {idx}",
+            "reason": reason,
+            "match_explanation": {
+                "factor_weights": factor_weights,
+                "match_trace": match_trace,
+            },
+            "status": "DRAFT"
+        }
+        if group_class_id:
+            team_insert["class_id"] = group_class_id
+        if group_assignment_id:
+            team_insert["assignment_id"] = group_assignment_id
+            
+        try:
+            team_res = db.table("team_drafts").insert(team_insert).execute()
+            if not team_res.data:
+                continue
+                
+            team_id = team_res.data[0]["id"]
+            created_team_ids.append(team_id)
+            
+            member_inserts = [{"draft_team_id": team_id, "student_id": m} for m in valid_members]
+            db.table("team_draft_members").insert(member_inserts).execute()
+            
+        except Exception as e:
+            print(f"Supabase Error processing draft Team {idx}: {e}")
+            
+    return created_team_ids
+
+def publish_team_drafts(class_id, db_client=None):
+    db = db_client or supabase
+    if not db:
+        return False
+
+    try:
+        drafts_res = db.table("team_drafts").select("*").eq("class_id", class_id).execute()
+        drafts = drafts_res.data or []
+        created_team_ids = []
+        
+        if not drafts:
+            return False
+            
+        assignment_ids = {draft.get("assignment_id") for draft in drafts if draft.get("assignment_id")}
+        legacy_draft_exists = any(draft.get("assignment_id") is None for draft in drafts)
+
+        if legacy_draft_exists:
+            existing_teams_result = db.table("teams").select("id").eq("class_id", class_id).execute()
+            existing_team_ids = [team["id"] for team in (existing_teams_result.data or []) if team.get("id")]
+            if existing_team_ids:
+                db.table("teams").delete().in_("id", existing_team_ids).execute()
+        else:
+            existing_team_ids = []
+            for assignment_id in assignment_ids:
+                existing_teams_result = db.table("teams").select("id").eq("class_id", class_id).eq("assignment_id", assignment_id).execute()
+                team_ids = [team["id"] for team in (existing_teams_result.data or []) if team.get("id")]
+                if team_ids:
+                    db.table("teams").delete().in_("id", team_ids).execute()
+
+        for draft in drafts:
+            team_insert = {
+                "class_id": draft["class_id"],
+                "name": draft["name"],
+                "reason": draft["reason"],
+                "match_explanation": draft["match_explanation"]
+            }
+            if draft.get("assignment_id"):
+                team_insert["assignment_id"] = draft["assignment_id"]
+
+            team_res = db.table("teams").insert(team_insert).execute()
+            if team_res.data:
+                team_id = team_res.data[0]["id"]
+                created_team_ids.append(team_id)
+
+                members_res = db.table("team_draft_members").select("student_id").eq("draft_team_id", draft["id"]).execute()
+                member_ids = [m["student_id"] for m in (members_res.data or [])]
+
+                if member_ids:
+                    if draft.get("assignment_id"):
+                        member_rows = [
+                            {
+                                "student_id": member_id,
+                                "team_id": team_id,
+                                "assignment_id": draft["assignment_id"],
+                            }
+                            for member_id in member_ids
+                        ]
+                        db.table("team_members").insert(member_rows).execute()
+                    else:
+                        db.table("student_profiles").update({"team_id": team_id}).in_("id", member_ids).execute()
+
+                    member_profiles_res = db.table("student_profiles").select("*").in_("id", member_ids).execute()
+                    if member_profiles_res.data:
+                        insert_coaching_messages(db, team_id, draft["name"], member_profiles_res.data)
+
+        if existing_team_ids:
+            db.table("teams").delete().in_("id", existing_team_ids).execute()
+
+        db.table("team_drafts").delete().eq("class_id", class_id).execute()
+        print(f"Published {len(created_team_ids)} draft teams for class {class_id}: {created_team_ids}")
+        return {"success": True, "created_team_ids": created_team_ids}
+    except Exception as e:
+        print(f"Error publishing team drafts: {e}")
+        return {"success": False, "error": str(e)}
+
 def get_all_teams():
     """
     Fetches all teams from the Supabase 'teams' table.
