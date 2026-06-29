@@ -11,9 +11,10 @@ import {
   type Assignment,
   type SurveyResponse,
 } from "@/app/educator/(workspace)/classes/assignment-card";
-import { type DraftTeam } from "./draft-teams-board";
 import { CreateAssignmentModal } from "@/app/educator/(workspace)/classes/create-assignment-modal";
 import { ClassFeedbackOverview } from "@/app/educator/(workspace)/classes/class-feedback-overview";
+import { ClassExternalDataPanel } from "@/app/educator/(workspace)/classes/class-external-data-panel";
+import { DraftTeamsBoard, DraftTeam } from "./draft-teams-board";
 
 interface ClassDetails {
   id: string;
@@ -27,6 +28,7 @@ interface ClassDetails {
 interface EnrolledStudent {
   id: string;
   survey_name: string | null;
+  survey_external_student_id: string | null;
   enrolled_at: string;
   survey_completed: boolean;
 }
@@ -145,6 +147,7 @@ export default function ClassManagementPage() {
             email,
             survey_name,
             profile_survey_completed_at,
+            survey_external_student_id,
             survey_degree_title,
             survey_year,
             survey_alevel_or_equivalent_titles,
@@ -175,6 +178,7 @@ export default function ClassManagementPage() {
         const students = enrollmentData.map((enrollment: any) => ({
           id: enrollment.student_profiles.id,
           survey_name: enrollment.student_profiles.survey_name,
+          survey_external_student_id: enrollment.student_profiles.survey_external_student_id,
           enrolled_at: enrollment.enrolled_at,
           survey_completed: enrollment.student_profiles.profile_survey_completed_at !== null,
         }));
@@ -489,6 +493,10 @@ export default function ClassManagementPage() {
         )}
 
         <div className="mt-8">
+          <ClassExternalDataPanel classId={classId} />
+        </div>
+
+        <div className="mt-8">
           <ClassFeedbackOverview classId={classId} />
         </div>
 
@@ -588,6 +596,11 @@ export default function ClassManagementPage() {
                     <h3 className="font-medium text-foreground">
                       {student.survey_name || "Unnamed Student"}
                     </h3>
+                    {student.survey_external_student_id && (
+                      <p className="text-xs font-mono text-muted">
+                        ID: {student.survey_external_student_id}
+                      </p>
+                    )}
                     <div className="mt-1 flex items-center gap-2">
                       <p className="text-xs text-muted">
                         Enrolled {new Date(student.enrolled_at).toLocaleDateString()}

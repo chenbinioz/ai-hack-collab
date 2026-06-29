@@ -32,7 +32,10 @@ export async function updateStudentAuthSession(request: NextRequest) {
     },
   });
 
-  await supabase.auth.getUser();
+  await supabase.auth.getUser().catch(() => {
+    // Dev environments behind TLS-inspecting proxies can fail certificate verification
+    // when refreshing the session in middleware; route handlers still validate auth.
+  });
 
   return response;
 }

@@ -2,6 +2,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import {
   ASSIGNMENT_FILES_BUCKET,
   CHAT_FILES_BUCKET,
+  CLASS_EXTERNAL_DATA_BUCKET,
 } from "./constants";
 import { sanitizeFileName } from "./validation";
 
@@ -19,6 +20,37 @@ export function buildChatStoragePath(
   fileName: string,
 ): string {
   return `${teamId}/${messageId}/${sanitizeFileName(fileName)}`;
+}
+
+export function buildClassExternalDataStoragePath(
+  classId: string,
+  layerId: string,
+  fileType: string,
+): string {
+  return `${classId}/${layerId}/${fileType}.csv`;
+}
+
+export async function uploadClassExternalDataFile(
+  supabase: SupabaseClient,
+  classId: string,
+  layerId: string,
+  fileType: string,
+  file: File,
+): Promise<string> {
+  const storagePath = buildClassExternalDataStoragePath(classId, layerId, fileType);
+
+  const { error } = await supabase.storage
+    .from(CLASS_EXTERNAL_DATA_BUCKET)
+    .upload(storagePath, file, {
+      contentType: file.type || "text/csv",
+      upsert: true,
+    });
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return storagePath;
 }
 
 export async function uploadAssignmentFile(

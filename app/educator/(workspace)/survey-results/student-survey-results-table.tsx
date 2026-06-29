@@ -159,6 +159,9 @@ export function StudentSurveyResultsTable() {
                 <Th className="sticky left-[9rem] z-20 min-w-[11rem] bg-black/[0.04] shadow-[1px_0_0_0_var(--tw-shadow-color)] shadow-black/10 dark:bg-white/[0.06] dark:shadow-white/10">
                   Email
                 </Th>
+                <Th title="External student ID (P + 8 digits)" className="min-w-[6rem] normal-case">
+                  Student ID
+                </Th>
                 <Th title="Degree title">Degree</Th>
                 <Th title="Year of study">Yr</Th>
                 <Th title="A-level or equivalent subjects" className="min-w-[9rem] normal-case">
@@ -231,6 +234,9 @@ export function StudentSurveyResultsTable() {
                     title={r.email}
                   >
                     {r.email || "—"}
+                  </Cell>
+                  <Cell className="whitespace-nowrap font-mono text-xs">
+                    {r.survey_external_student_id ?? "—"}
                   </Cell>
                   <Cell className="max-w-[10rem] truncate" title={r.survey_degree_title ?? undefined}>
                     {r.survey_degree_title ?? "—"}

@@ -8,6 +8,12 @@ from supabase import create_client
 
 from database import init_db, save_student, get_all_students, get_all_teams, save_teams, reset_matches, supabase, compute_collaboration_balance_for_teams, save_team_drafts, publish_team_drafts
 from matcher import match_students
+from external_data import (
+    REQUIRED_FILE_TYPE,
+    parse_csv_text,
+    merge_layered_rows,
+    compute_all_insights,
+)
 
 app = FastAPI()
 
@@ -581,6 +587,7 @@ def _collect_valid_students_for_matching(admin_supabase, class_id: str):
         student_profiles!inner(
             id,
             survey_name,
+            survey_external_student_id,
             profile_survey_completed_at,
             survey_alevel_or_equivalent_titles,
             survey_ancillary_module,
@@ -612,6 +619,7 @@ def _collect_valid_students_for_matching(admin_supabase, class_id: str):
             valid_students.append({
                 "id": student["id"],
                 "survey_name": student.get("survey_name"),
+                "survey_external_student_id": student.get("survey_external_student_id"),
                 "survey_alevel_or_equivalent_titles": student.get("survey_alevel_or_equivalent_titles"),
                 "survey_ancillary_module": student.get("survey_ancillary_module"),
                 "survey_confidence_coding": student.get("survey_confidence_coding"),
@@ -635,6 +643,7 @@ def _collect_valid_students_for_matching(admin_supabase, class_id: str):
         return None, {"error": "Need at least 2 students with completed surveys to generate teams"}
 
     required_fields = [
+        "survey_external_student_id",
         "survey_alevel_or_equivalent_titles",
         "survey_ancillary_module",
         "survey_confidence_coding",
@@ -693,6 +702,151 @@ def _collect_valid_students_for_matching(admin_supabase, class_id: str):
         }
 
     return valid_students, None
+
+
+def _attach_external_insights(admin_supabase, class_id: str, students: list) -> list:
+    """Attach external_learning_analytics from precomputed class insights."""
+    external_ids = [
+        s.get("survey_external_student_id")
+        for s in students
+        if s.get("survey_external_student_id")
+    ]
+    if not external_ids:
+        for s in students:
+            s["external_learning_analytics"] = None
+        return students
+
+    insights_res = (
+        admin_supabase.table("class_external_student_insights")
+        .select("external_person_id, insights")
+        .eq("class_id", class_id)
+        .in_("external_person_id", external_ids)
+        .execute()
+    )
+    insight_map = {
+        row["external_person_id"]: row.get("insights")
+        for row in (insights_res.data or [])
+    }
+
+    for student in students:
+        ext_id = student.get("survey_external_student_id")
+        student["external_learning_analytics"] = insight_map.get(ext_id) if ext_id else None
+
+    return students
+
+
+def _process_class_external_data_layer(admin_supabase, class_id: str, layer_id: str):
+    """Merge all layers up to and including layer_id, recompute insights for the class."""
+    layers_res = (
+        admin_supabase.table("class_external_data_layers")
+        .select("id, layer_number, process_status")
+        .eq("class_id", class_id)
+        .order("layer_number")
+        .execute()
+    )
+    layers = layers_res.data or []
+    target_layer = next((l for l in layers if l["id"] == layer_id), None)
+    if not target_layer:
+        return {"error": "Layer not found"}
+
+    layer_ids = [l["id"] for l in layers if l["layer_number"] <= target_layer["layer_number"]]
+    if not layer_ids:
+        return {"error": "No layers to process"}
+
+    admin_supabase.table("class_external_data_layers").update({
+        "process_status": "processing",
+        "process_error": None,
+    }).eq("id", layer_id).execute()
+
+    from datetime import datetime, timezone
+
+    try:
+        files_res = (
+            admin_supabase.table("class_external_data_files")
+            .select("layer_id, file_type, storage_path")
+            .in_("layer_id", layer_ids)
+            .execute()
+        )
+        files = files_res.data or []
+        layer_number_by_id = {l["id"]: l["layer_number"] for l in layers}
+
+        has_person_dim = any(f.get("file_type") == REQUIRED_FILE_TYPE for f in files)
+        if not has_person_dim:
+            raise ValueError("person_dim is required before processing insights")
+
+        layered_rows: list[tuple[int, str, list]] = []
+        for file_row in files:
+            file_type = file_row.get("file_type")
+            storage_path = file_row.get("storage_path")
+            layer_id = file_row.get("layer_id")
+            layer_number = layer_number_by_id.get(layer_id, 0)
+            if not file_type or not storage_path:
+                continue
+
+            blob = admin_supabase.storage.from_("class-external-data").download(storage_path)
+            text = blob.decode("utf-8-sig") if isinstance(blob, bytes) else str(blob)
+            rows = parse_csv_text(file_type, text)
+            layered_rows.append((layer_number, file_type, rows))
+
+        merged = merge_layered_rows(layered_rows)
+        all_insights = compute_all_insights(merged)
+
+        admin_supabase.table("class_external_student_insights").delete().eq("class_id", class_id).execute()
+
+        if all_insights:
+            now_iso = datetime.now(timezone.utc).isoformat()
+            inserts = [
+                {
+                    "class_id": class_id,
+                    "external_person_id": p_id,
+                    "insights": insight,
+                    "computed_at": now_iso,
+                }
+                for p_id, insight in all_insights.items()
+            ]
+            admin_supabase.table("class_external_student_insights").insert(inserts).execute()
+
+        now_iso = datetime.now(timezone.utc).isoformat()
+        admin_supabase.table("class_external_data_layers").update({
+            "process_status": "completed",
+            "processed_at": now_iso,
+            "process_error": None,
+        }).eq("id", layer_id).execute()
+
+        return {
+            "success": True,
+            "insight_count": len(all_insights),
+            "merged_file_types": list(merged.keys()),
+        }
+    except Exception as e:
+        admin_supabase.table("class_external_data_layers").update({
+            "process_status": "failed",
+            "process_error": str(e),
+        }).eq("id", layer_id).execute()
+        return {"error": str(e)}
+
+
+@app.post("/educator/classes/{class_id}/external-data/layers/{layer_id}/process")
+def process_external_data_layer(class_id: str, layer_id: str, request: Request):
+    try:
+        supabase_url = os.getenv("SUPABASE_URL")
+        service_role_key = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
+        if not supabase_url or not service_role_key:
+            return {"error": "Backend misconfigured: Supabase service role required"}
+
+        educator_id, auth_error = _get_authenticated_user_id(request)
+        if auth_error:
+            return auth_error
+
+        admin_supabase = create_client(supabase_url, service_role_key)
+        _, class_error = _verify_educator_owns_class(educator_id, class_id)
+        if class_error:
+            return class_error
+
+        return _process_class_external_data_layer(admin_supabase, class_id, layer_id)
+    except Exception as e:
+        print(f"Error processing external data layer: {e}")
+        return {"error": str(e)}
 
 
 @app.get("/educator/classes/{class_id}/assignments")
@@ -918,6 +1072,8 @@ def generate_assignment_teams(class_id: str, assignment_id: str, request: Reques
         valid_students, students_error = _collect_valid_students_for_matching(admin_supabase, class_id)
         if students_error:
             return students_error
+
+        valid_students = _attach_external_insights(admin_supabase, class_id, valid_students)
 
         assignment_goal_hint = (
             assignment_data.get("description") or assignment_data.get("title") or class_data.get("name") or ""

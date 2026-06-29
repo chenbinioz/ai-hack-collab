@@ -293,11 +293,12 @@ def _normalize_weights(raw_weights):
     Normalize a dict of factor weights so they sum to 1.0.
     """
     defaults = {
-        "previous_experience": 0.20,
-        "skills": 0.25,
-        "working_style": 0.25,
+        "previous_experience": 0.18,
+        "skills": 0.22,
+        "working_style": 0.22,
         "availability": 0.10,
-        "diversity": 0.20,
+        "diversity": 0.18,
+        "external_analytics": 0.10,
     }
 
     if not isinstance(raw_weights, dict):
@@ -359,14 +360,16 @@ def _weights_from_preferences(ai_preferences):
         "working_style": bool(ai_preferences.get("focus_working_style", True)),
         "availability": bool(ai_preferences.get("focus_availability", True)),
         "diversity": bool(ai_preferences.get("balance_diversity", True)),
+        "external_analytics": True,
     }
 
     base = {
-        "previous_experience": 0.20,
-        "skills": 0.25,
-        "working_style": 0.25,
+        "previous_experience": 0.18,
+        "skills": 0.22,
+        "working_style": 0.22,
         "availability": 0.10,
-        "diversity": 0.20,
+        "diversity": 0.18,
+        "external_analytics": 0.10,
     }
 
     active = {key: weight for key, weight in base.items() if toggles.get(key, False)}
@@ -383,6 +386,7 @@ def _fallback_trace(reason, weights):
         "working_style": "Working style alignment",
         "availability": "Availability overlap",
         "diversity": "Strength diversity",
+        "external_analytics": "External learning analytics",
     }
 
     reason_text = (reason or "Balanced match based on the available learner profile signals.").strip()
@@ -843,6 +847,9 @@ def match_students(students, ai_preferences=None, class_context=None):
                 "communication_style_for_coordination": _scale(s.get("survey_approach_communication")),
             },
         }
+        external = s.get("external_learning_analytics")
+        if external:
+            cleaned["external_learning_analytics"] = external
         if wanted_skills:
             cleaned["relevant_skills_confidence_1_to_5"] = {
                 key: cleaned["relevant_skills_confidence_1_to_5"][key]
@@ -857,6 +864,14 @@ def match_students(students, ai_preferences=None, class_context=None):
     prompt_parts = ["Form student groups for project work."]
     prompt_parts.append(
         "Do not ask for additional information. Use only the provided JSON fields and class context to make the grouping decision."
+    )
+    prompt_parts.append(
+        "Use ALL of these matching criteria for every grouping decision: "
+        "(1) previous subject experience (A-Level/equivalent subjects + ancillary module), "
+        "(2) relevant skills confidence (coding, written reports, presentation/public speaking, mathematical literacy, abstract/complex content, conflict resolution), "
+        "(3) approach to work preferences across all 9 sliders, "
+        "(4) scheduling_context, "
+        "(5) external_learning_analytics when present (LMS login patterns, module marks, video engagement trends)."
     )
     if wanted_skills:
         skill_labels = ", ".join(
@@ -882,6 +897,14 @@ def match_students(students, ai_preferences=None, class_context=None):
         "prefer balance so each team has complementary discussion dynamics."
     )
 
+    prompt_parts.append(
+        "When external_learning_analytics is available for a student, use those trends alongside survey data "
+        "to improve team balance (e.g. complementary login times, mixed academic strengths). "
+        "Students without external data should still be matched fairly using survey fields only."
+    )
+
+    if ai_preferences.get("focus_skills", True):
+        prompt_parts.append("Prioritize complementary skills within each group.")
     if wanted_skills:
         skill_labels = ", ".join(
             MATCHING_SKILL_LABELS.get(skill, skill.replace("_", " ").title())
@@ -929,7 +952,8 @@ def match_students(students, ai_preferences=None, class_context=None):
         "\"skills\": number,"
         "\"working_style\": number,"
         "\"availability\": number,"
-        "\"diversity\": number"
+        "\"diversity\": number,"
+        "\"external_analytics\": number"
         "},"
         "\"groups\": [{"
         "\"members\": [\"id1\", \"id2\"],"

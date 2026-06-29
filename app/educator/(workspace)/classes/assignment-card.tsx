@@ -142,6 +142,7 @@ const factorLabelMap: Record<string, string> = {
   new_concepts_preference: "Openness to new concepts",
   teammate_work_preference: "Preferred work distribution",
   deadline_working_pattern: "Deadline work rhythm",
+  external_analytics: "External learning analytics",
 };
 
 function formatFactorLabel(factor: string) {

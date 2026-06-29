@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@/lib/supabase/server-client";
+import { resolveRequestUser } from "@/lib/auth/request-user";
+import { createClientFromRequest } from "@/lib/supabase/server-client";
 
 interface ClassData {
   id: string;
@@ -13,25 +14,13 @@ interface ClassData {
 
 export async function GET(request: NextRequest) {
   try {
-    const supabase = await createClient();
+    const supabase = await createClientFromRequest(request);
 
-    // Get current user from cookie session; fallback to bearer token for client fetches.
-    let { data: { user }, error: userError } = await supabase.auth.getUser();
-    if (!user) {
-      const authHeader = request.headers.get("authorization") || request.headers.get("Authorization");
-      if (authHeader?.startsWith("Bearer ")) {
-        const token = authHeader.slice("Bearer ".length);
-        const tokenUserResult = await supabase.auth.getUser(token);
-        user = tokenUserResult.data.user;
-        userError = tokenUserResult.error;
-      }
-    }
-
+    const { user, error: userError } = await resolveRequestUser(supabase, request);
     if (userError || !user) {
       return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
     }
 
-    // Get classes for this educator
     const { data: classes, error: classesError } = await supabase
       .from("classes")
       .select("*")
@@ -43,7 +32,6 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: "Failed to fetch classes" }, { status: 500 });
     }
 
-    // Get enrollment counts for each class
     const classesWithCounts = await Promise.all(
       (classes || []).map(async (classItem: ClassData) => {
         const [{ count: studentCount }, { count: assignmentCount }] = await Promise.all([
@@ -62,7 +50,7 @@ export async function GET(request: NextRequest) {
           student_count: studentCount || 0,
           assignment_count: assignmentCount || 0,
         };
-      })
+      }),
     );
 
     return NextResponse.json({ classes: classesWithCounts });
@@ -74,10 +62,9 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
-    const supabase = await createClient();
+    const supabase = await createClientFromRequest(request);
 
-    // Get current user
-    const { data: { user }, error: userError } = await supabase.auth.getUser();
+    const { user, error: userError } = await resolveRequestUser(supabase, request);
     if (userError || !user) {
       return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
     }
@@ -89,7 +76,6 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Class name is required" }, { status: 400 });
     }
 
-    // Generate unique class code using RPC function
     const { data: classCode, error: codeError } = await supabase.rpc("generate_class_code");
 
     if (codeError || !classCode) {
@@ -97,7 +83,6 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Failed to generate class code" }, { status: 500 });
     }
 
-    // Create the class
     const classData = {
       educator_id: user.id,
       name: name.trim(),
@@ -119,7 +104,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({
       success: true,
       class: newClass,
-      join_code: classCode
+      join_code: classCode,
     });
   } catch (error) {
     console.error("Error in POST /api/educator/classes:", error);
