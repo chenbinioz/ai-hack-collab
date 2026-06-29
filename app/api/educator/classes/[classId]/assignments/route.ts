@@ -1,14 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { resolveRequestUser } from "@/lib/auth/request-user";
-import { createClientFromRequest } from "@/lib/supabase/server-client";
-
-const DEFAULT_AI_PREFERENCES = {
-  focus_skills: true,
-  focus_working_style: true,
-  focus_availability: true,
-  balance_diversity: true,
-};
-import { createClient } from "@/lib/supabase/server-client";
+import { createClientFromRequest, createClient } from "@/lib/supabase/server-client";
 import {
   DEFAULT_AI_PREFERENCES,
   normalizeAiPreferences,
