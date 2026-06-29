@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { createStudentBrowserClient } from "@/lib/supabase/student-browser-client";
 import { TeamMessaging } from "./team-messaging";
 import { FeedbackModal } from "./feedback-modal";
+import { AssignmentProgressTracker } from "./assignment-progress-tracker";
 
 interface Team {
   id: string;
@@ -287,6 +288,15 @@ export function TeamHub({ assignmentId, classId, className = "mt-10" }: TeamHubP
               </p>
             )}
           </div>
+
+          <AssignmentProgressTracker
+            classId={classId}
+            assignmentId={assignmentId}
+            mode="student"
+            teamId={team.id}
+            teamName={team.name}
+            className="mt-6"
+          />
         </>
       )}
 
