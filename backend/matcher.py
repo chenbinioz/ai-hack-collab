@@ -4,21 +4,76 @@ import hashlib
 import time
 import random
 import re
+import socket
+import ssl
 from pathlib import Path
 from datetime import datetime, timedelta
 import urllib.request
 import urllib.error
+import certifi
 from dotenv import load_dotenv
 
 # Load project-root .env regardless of process working directory.
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 load_dotenv(PROJECT_ROOT / ".env", override=True)
 
+
+def _gemini_ssl_context() -> ssl.SSLContext:
+    """Use certifi CA bundle — macOS Python often lacks system certs for urllib."""
+    return ssl.create_default_context(cafile=certifi.where())
+
+
+def _gemini_list_timeout() -> int:
+    raw = os.getenv("GEMINI_LIST_TIMEOUT_SECONDS", "30")
+    try:
+        return max(5, int(raw))
+    except ValueError:
+        return 30
+
+
+def _gemini_generate_timeout() -> int:
+    raw = os.getenv("GEMINI_REQUEST_TIMEOUT_SECONDS", "180")
+    try:
+        return max(30, int(raw))
+    except ValueError:
+        return 180
+
+
+def _is_gemini_timeout_error(exc: BaseException) -> bool:
+    if isinstance(exc, (TimeoutError, socket.timeout)):
+        return True
+    if isinstance(exc, urllib.error.URLError):
+        reason = getattr(exc, "reason", None)
+        return isinstance(reason, (TimeoutError, socket.timeout))
+    return False
+
+
+def _gemini_timeout_error_text(exc: BaseException) -> str:
+    return f"Gemini request timed out: {exc}"
+
 # Configure Gemini
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
 # Use a valid model name. Can be overridden for resilience in different environments.
 MODEL_NAME = os.getenv("GEMINI_MODEL_NAME", "gemini-2.5-flash")
+
+ALL_MATCHING_SKILL_KEYS = [
+    "coding",
+    "written_reports",
+    "presentation_public_speaking",
+    "mathematical_literacy",
+    "understanding_abstract_complex_content",
+    "conflict_resolution",
+]
+
+MATCHING_SKILL_LABELS = {
+    "coding": "Coding",
+    "written_reports": "Written reports",
+    "presentation_public_speaking": "Presentation / public speaking",
+    "mathematical_literacy": "Mathematical literacy",
+    "understanding_abstract_complex_content": "Understanding abstract / complex content",
+    "conflict_resolution": "Conflict resolution",
+}
 
 
 def _configured_model_candidates():
@@ -79,7 +134,9 @@ def _list_generate_content_models(active_key):
     endpoint = f"https://generativelanguage.googleapis.com/v1beta/models?key={active_key}"
     request = urllib.request.Request(endpoint, method="GET")
 
-    with urllib.request.urlopen(request, timeout=30) as resp:
+    with urllib.request.urlopen(
+        request, timeout=_gemini_list_timeout(), context=_gemini_ssl_context()
+    ) as resp:
         payload = json.loads(resp.read().decode("utf-8"))
 
     models = payload.get("models") or []
@@ -266,13 +323,39 @@ def _normalize_weights(raw_weights):
     return {k: v / total for k, v in cleaned.items()}
 
 
+def _resolve_wanted_skills(ai_preferences):
+    """
+    Resolve educator-selected wanted skills, with legacy focus_skills fallback.
+    """
+    if not isinstance(ai_preferences, dict):
+        ai_preferences = {}
+
+    raw_wanted = ai_preferences.get("wanted_skills")
+    if isinstance(raw_wanted, list):
+        valid_keys = set(ALL_MATCHING_SKILL_KEYS)
+        resolved = []
+        seen = set()
+        for item in raw_wanted:
+            if not isinstance(item, str) or item not in valid_keys or item in seen:
+                continue
+            seen.add(item)
+            resolved.append(item)
+        return resolved
+
+    if bool(ai_preferences.get("focus_skills", True)):
+        return list(ALL_MATCHING_SKILL_KEYS)
+
+    return []
+
+
 def _weights_from_preferences(ai_preferences):
     """
     Build explainable factor weights from boolean AI preferences.
     """
+    wanted_skills = _resolve_wanted_skills(ai_preferences)
     toggles = {
         "previous_experience": True,
-        "skills": bool(ai_preferences.get("focus_skills", True)),
+        "skills": len(wanted_skills) > 0,
         "working_style": bool(ai_preferences.get("focus_working_style", True)),
         "availability": bool(ai_preferences.get("focus_availability", True)),
         "diversity": bool(ai_preferences.get("balance_diversity", True)),
@@ -391,12 +474,86 @@ def _normalize_matches(parsed, ai_preferences):
     }
 
 
+def _chunk_students_for_ideal_size(student_ids, ideal_team_size):
+    """Partition students into teams of ideal_team_size with minimal remainder deviation."""
+    ids = [sid for sid in student_ids if isinstance(sid, str) and len(sid) == 36]
+    n = len(ids)
+    if n == 0 or ideal_team_size < 2:
+        return []
+
+    teams = []
+    idx = 0
+    while idx < n:
+        remaining = n - idx
+        if remaining <= ideal_team_size:
+            teams.append(ids[idx:])
+            break
+        if remaining == ideal_team_size + 1:
+            teams.append(ids[idx : idx + ideal_team_size + 1])
+            break
+        teams.append(ids[idx : idx + ideal_team_size])
+        idx += ideal_team_size
+    return teams
+
+
+def _enforce_ideal_team_sizes(matches, ideal_team_size):
+    """Rebalance AI groups when they do not match the configured ideal team size."""
+    if not isinstance(matches, dict) or not ideal_team_size or ideal_team_size < 2:
+        return matches
+
+    groups = matches.get("groups")
+    if not isinstance(groups, list) or not groups:
+        return matches
+
+    all_members = []
+    template_reason = "Grouped to match the configured ideal team size."
+    template_trace = []
+
+    for group in groups:
+        if not isinstance(group, dict):
+            continue
+        for member in group.get("members", []):
+            if isinstance(member, str) and member not in all_members:
+                all_members.append(member)
+        if group.get("reason"):
+            template_reason = group["reason"]
+        if group.get("match_trace") and not template_trace:
+            template_trace = group["match_trace"]
+
+    if not all_members:
+        return matches
+
+    current_sizes = [
+        len(group.get("members", []))
+        for group in groups
+        if isinstance(group, dict)
+    ]
+    if (
+        current_sizes
+        and sum(current_sizes) == len(all_members)
+        and all(size == ideal_team_size for size in current_sizes)
+    ):
+        return matches
+
+    chunks = _chunk_students_for_ideal_size(all_members, ideal_team_size)
+    matches["groups"] = [
+        {
+            "members": chunk,
+            "reason": template_reason,
+            "match_trace": template_trace,
+        }
+        for chunk in chunks
+    ]
+    return matches
+
+
 def _call_gemini_with_retries(prompt, active_key, model_name, max_attempts=4):
     """
     Call Gemini with retry/backoff for transient overload and gateway failures.
     """
     retryable_statuses = {429, 500, 502, 503, 504}
     last_error_text = ""
+    request_timeout = _gemini_generate_timeout()
 
     for attempt in range(1, max_attempts + 1):
         try:
@@ -417,8 +574,20 @@ def _call_gemini_with_retries(prompt, active_key, model_name, max_attempts=4):
                 method="POST",
             )
 
-            with urllib.request.urlopen(request, timeout=60) as resp:
+            with urllib.request.urlopen(
+                request, timeout=request_timeout, context=_gemini_ssl_context()
+            ) as resp:
                 return json.loads(resp.read().decode("utf-8"))
+        except TimeoutError as e:
+            last_error_text = _gemini_timeout_error_text(e)
+            if attempt == max_attempts:
+                raise RuntimeError(last_error_text) from e
+            sleep_seconds = (2 ** (attempt - 1)) + random.uniform(0, 0.75)
+            print(
+                f"Gemini model '{model_name}' timed out after {request_timeout}s; "
+                f"retrying in {sleep_seconds:.2f}s (attempt {attempt}/{max_attempts})"
+            )
+            time.sleep(sleep_seconds)
         except urllib.error.HTTPError as e:
             body = e.read().decode("utf-8", errors="ignore")
             last_error_text = f"Gemini HTTP {e.code}: {body}"
@@ -444,7 +613,10 @@ def _call_gemini_with_retries(prompt, active_key, model_name, max_attempts=4):
             )
             time.sleep(sleep_seconds)
         except urllib.error.URLError as e:
-            last_error_text = f"Gemini network error: {e}"
+            if _is_gemini_timeout_error(e):
+                last_error_text = _gemini_timeout_error_text(e)
+            else:
+                last_error_text = f"Gemini network error: {e}"
             if attempt == max_attempts:
                 raise RuntimeError(last_error_text) from e
             sleep_seconds = (2 ** (attempt - 1)) + random.uniform(0, 0.75)
@@ -472,6 +644,9 @@ def _call_gemini_with_model_failover(prompt, active_key):
         except RuntimeError as e:
             failures.append(f"{model_name}: {e}")
             print(f"Gemini model failover: '{model_name}' failed, trying next model.")
+        except (TimeoutError, socket.timeout) as e:
+            failures.append(f"{model_name}: {_gemini_timeout_error_text(e)}")
+            print(f"Gemini model failover: '{model_name}' timed out, trying next model.")
 
     raise RuntimeError(
         "All configured Gemini models failed. "
@@ -549,7 +724,8 @@ def match_students(students, ai_preferences=None, class_context=None):
     """
     if ai_preferences is None:
         ai_preferences = {
-            "focus_skills": True,
+            "wanted_skills": [],
+            "focus_skills": False,
             "focus_working_style": True,
             "focus_availability": True,
             "balance_diversity": True
@@ -557,6 +733,8 @@ def match_students(students, ai_preferences=None, class_context=None):
 
     if class_context is None:
         class_context = {}
+
+    wanted_skills = _resolve_wanted_skills(ai_preferences)
 
     active_key = (os.getenv("GEMINI_API_KEY") or GEMINI_API_KEY or "").strip()
     if not active_key:
@@ -625,6 +803,11 @@ def match_students(students, ai_preferences=None, class_context=None):
                 "communication_style_for_coordination": _scale(s.get("survey_approach_communication")),
             },
         }
+        if wanted_skills:
+            cleaned["relevant_skills_confidence_1_to_5"] = {
+                key: cleaned["relevant_skills_confidence_1_to_5"][key]
+                for key in wanted_skills
+            }
         cleaned_students.append(cleaned)
 
     # Compact JSON to reduce token usage under free-tier quotas.
@@ -635,20 +818,39 @@ def match_students(students, ai_preferences=None, class_context=None):
     prompt_parts.append(
         "Do not ask for additional information. Use only the provided JSON fields and class context to make the grouping decision."
     )
-    prompt_parts.append(
-        "Use ALL of these matching criteria for every grouping decision: "
-        "(1) previous subject experience (A-Level/equivalent subjects + ancillary module), "
-        "(2) relevant skills confidence (coding, written reports, presentation/public speaking, mathematical literacy, abstract/complex content, conflict resolution), "
-        "(3) approach to work preferences across all 9 sliders, "
-        "(4) scheduling_context."
-    )
+    if wanted_skills:
+        skill_labels = ", ".join(
+            MATCHING_SKILL_LABELS.get(skill, skill.replace("_", " ").title())
+            for skill in wanted_skills
+        )
+        prompt_parts.append(
+            "Use ALL of these matching criteria for every grouping decision: "
+            "(1) previous subject experience (A-Level/equivalent subjects + ancillary module), "
+            f"(2) relevant skills confidence for these educator-selected skills only: {skill_labels}, "
+            "(3) approach to work preferences across all 9 sliders, "
+            "(4) scheduling_context."
+        )
+    else:
+        prompt_parts.append(
+            "Use ALL of these matching criteria for every grouping decision: "
+            "(1) previous subject experience (A-Level/equivalent subjects + ancillary module), "
+            "(3) approach to work preferences across all 9 sliders, "
+            "(4) scheduling_context."
+        )
     prompt_parts.append(
         "Important rule: For discussion_preference, avoid creating groups where everyone is the same extreme; "
         "prefer balance so each team has complementary discussion dynamics."
     )
 
-    if ai_preferences.get("focus_skills", True):
-        prompt_parts.append("Prioritize complementary skills within each group.")
+    if wanted_skills:
+        skill_labels = ", ".join(
+            MATCHING_SKILL_LABELS.get(skill, skill.replace("_", " ").title())
+            for skill in wanted_skills
+        )
+        prompt_parts.append(
+            "Prioritize complementary skills within each group for these skills only: "
+            f"{skill_labels}. Ensure each team has a mix of strengths across those dimensions."
+        )
 
     if ai_preferences.get("focus_working_style", True):
         prompt_parts.append("Consider working styles and communication preferences.")
@@ -659,9 +861,25 @@ def match_students(students, ai_preferences=None, class_context=None):
     if ai_preferences.get("focus_availability", True):
         prompt_parts.append("Consider scheduling compatibility using scheduling_context.")
 
-    max_team_size = class_context.get("max_team_size", 3)
-    prompt_parts.append(f"\n🚨 HARD CONSTRAINT: Each group must have AT MOST {max_team_size} members. Do not exceed {max_team_size} students per group.")
-    prompt_parts.append(f"\nTarget: Create groups with 2 to {max_team_size} students each, never more than {max_team_size}.")
+    ideal_team_size = class_context.get("ideal_team_size") or class_context.get("max_team_size", 3)
+    student_count = class_context.get("student_count", len(cleaned_students))
+    remainder = student_count % ideal_team_size if ideal_team_size else 0
+    prompt_parts.append(
+        f"\n🚨 TEAM SIZE CONSTRAINT: There are {student_count} students. "
+        f"The ideal team size is {ideal_team_size} — every group should have exactly {ideal_team_size} members."
+    )
+    if remainder == 0:
+        prompt_parts.append(
+            f"All groups must have exactly {ideal_team_size} members "
+            f"({student_count // ideal_team_size} teams of {ideal_team_size})."
+        )
+    else:
+        prompt_parts.append(
+            f"Student count does not divide evenly by {ideal_team_size} (remainder {remainder}). "
+            f"Minimize deviations: create as many teams of exactly {ideal_team_size} as possible. "
+            f"At most one team may differ; prefer a single team of {ideal_team_size + 1} "
+            f"over teams smaller than {ideal_team_size} or singleton groups."
+        )
     prompt_parts.append(f"\n\nStudent data (JSON format):\n{profiles_json}\n\n")
     prompt_parts.append(
         "Create balanced groups and return ONLY valid JSON with this schema: "
@@ -695,7 +913,38 @@ def match_students(students, ai_preferences=None, class_context=None):
         print(f"Gemini matching succeeded using model: {model_used}")
 
         parsed = _parse_model_json_response(response_json)
-        return _normalize_matches(parsed, ai_preferences)
+        normalized = _normalize_matches(parsed, ai_preferences)
+        ideal_team_size = class_context.get("ideal_team_size") or class_context.get("max_team_size")
+        enforced = _enforce_ideal_team_sizes(normalized, ideal_team_size)
+        # #region agent log
+        try:
+            sizes = [
+                len(group.get("members", []))
+                for group in enforced.get("groups", [])
+                if isinstance(group, dict)
+            ]
+            with (PROJECT_ROOT / ".cursor" / "debug-a3dd45.log").open("a", encoding="utf-8") as log_file:
+                log_file.write(
+                    json.dumps(
+                        {
+                            "sessionId": "a3dd45",
+                            "timestamp": int(time.time() * 1000),
+                            "location": "matcher.py:match_students",
+                            "message": "Team sizes after enforcement",
+                            "data": {
+                                "ideal_team_size": ideal_team_size,
+                                "team_sizes": sizes,
+                                "team_count": len(sizes),
+                            },
+                            "hypothesisId": "H3,H4",
+                        }
+                    )
+                    + "\n"
+                )
+        except Exception:
+            pass
+        # #endregion
+        return enforced
     except RuntimeError as e:
         return {"error": f"AI Matching failed: {e}"}
     except Exception as e:

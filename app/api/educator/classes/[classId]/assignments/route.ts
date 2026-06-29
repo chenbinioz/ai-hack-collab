@@ -1,12 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server-client";
-
-const DEFAULT_AI_PREFERENCES = {
-  focus_skills: true,
-  focus_working_style: true,
-  focus_availability: true,
-  balance_diversity: true,
-};
+import {
+  DEFAULT_AI_PREFERENCES,
+  normalizeAiPreferences,
+} from "@/lib/matching/skill-preferences";
+import {
+  assignmentUpdatesFromBody,
+  normalizeAssignmentRow,
+} from "@/lib/assignments/normalize-assignment";
 
 async function verifyEducatorOwnsClass(
   supabase: Awaited<ReturnType<typeof createClient>>,
@@ -52,7 +53,9 @@ export async function GET(
       return NextResponse.json({ error: "Failed to fetch assignments" }, { status: 500 });
     }
 
-    return NextResponse.json({ assignments: assignments || [] });
+    return NextResponse.json({
+      assignments: (assignments || []).map((row) => normalizeAssignmentRow(row)),
+    });
   } catch (error) {
     console.error("Error in GET /api/educator/classes/[classId]/assignments:", error);
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });
@@ -78,7 +81,7 @@ export async function POST(
     }
 
     const body = await request.json();
-    const { title, description, due_date, max_team_size, ai_preferences } = body;
+    const { title, description, due_date, ideal_team_size, ai_preferences } = body;
 
     if (!title || typeof title !== "string" || title.trim().length === 0) {
       return NextResponse.json({ error: "Assignment title is required" }, { status: 400 });
@@ -108,8 +111,8 @@ export async function POST(
       title: title.trim(),
       description: description?.trim() || null,
       due_date: parsedDueDate,
-      max_team_size: Math.max(2, Math.min(10, max_team_size || 3)),
-      ai_preferences: ai_preferences || DEFAULT_AI_PREFERENCES,
+      ...assignmentUpdatesFromBody({ ideal_team_size }),
+      ai_preferences: normalizeAiPreferences(ai_preferences || DEFAULT_AI_PREFERENCES),
       sort_order: sortOrder,
       created_by: user.id,
     };
@@ -125,7 +128,7 @@ export async function POST(
       return NextResponse.json({ error: "Failed to create assignment" }, { status: 500 });
     }
 
-    return NextResponse.json({ success: true, assignment });
+    return NextResponse.json({ success: true, assignment: normalizeAssignmentRow(assignment) });
   } catch (error) {
     console.error("Error in POST /api/educator/classes/[classId]/assignments:", error);
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });

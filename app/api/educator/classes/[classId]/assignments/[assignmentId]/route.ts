@@ -1,5 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server-client";
+import { normalizeAiPreferences } from "@/lib/matching/skill-preferences";
+import {
+  assignmentUpdatesFromBody,
+  normalizeAssignmentRow,
+} from "@/lib/assignments/normalize-assignment";
 
 async function verifyEducatorOwnsClass(
   supabase: Awaited<ReturnType<typeof createClient>>,
@@ -35,7 +40,7 @@ export async function PATCH(
     }
 
     const body = await request.json();
-    const { title, description, due_date, max_team_size, ai_preferences, sort_order } = body;
+    const { title, description, due_date, ideal_team_size, ai_preferences, sort_order } = body;
 
     const updates: Record<string, unknown> = {};
 
@@ -62,12 +67,12 @@ export async function PATCH(
       }
     }
 
-    if (max_team_size !== undefined) {
-      updates.max_team_size = Math.max(2, Math.min(10, max_team_size));
+    if (ideal_team_size !== undefined) {
+      Object.assign(updates, assignmentUpdatesFromBody({ ideal_team_size }));
     }
 
     if (ai_preferences !== undefined) {
-      updates.ai_preferences = ai_preferences;
+      updates.ai_preferences = normalizeAiPreferences(ai_preferences);
     }
 
     if (sort_order !== undefined) {
@@ -93,7 +98,7 @@ export async function PATCH(
       return NextResponse.json({ error: "Failed to update assignment" }, { status: 500 });
     }
 
-    return NextResponse.json({ success: true, assignment });
+    return NextResponse.json({ success: true, assignment: normalizeAssignmentRow(assignment) });
   } catch (error) {
     console.error("Error in PATCH /api/educator/classes/[classId]/assignments/[assignmentId]:", error);
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });

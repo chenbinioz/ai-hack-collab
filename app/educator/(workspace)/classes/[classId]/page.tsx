@@ -73,9 +73,11 @@ export default function ClassManagementPage() {
     }
   }, [classId]);
 
-  const fetchClassData = async () => {
+  const fetchClassData = async (options?: { silent?: boolean }) => {
     try {
-      setIsLoading(true);
+      if (!options?.silent) {
+        setIsLoading(true);
+      }
       setError(null);
 
       const { data: { session } } = await supabase.auth.getSession();
@@ -228,7 +230,9 @@ export default function ClassManagementPage() {
       console.error("Error fetching class data:", err);
       setError(err.message || "Failed to load class data");
     } finally {
-      setIsLoading(false);
+      if (!options?.silent) {
+        setIsLoading(false);
+      }
     }
   };
 
@@ -238,6 +242,21 @@ export default function ClassManagementPage() {
       .filter((member) => member.assignment_id === assignmentId)
       .forEach((member) => map.set(member.student_id, member.team_id));
     return map;
+  };
+
+  const applyAssignmentTeams = (
+    assignmentId: string,
+    newTeams: Team[],
+    newMembers: TeamMember[],
+  ) => {
+    setTeams((prev) => [
+      ...prev.filter((team) => team.assignment_id !== assignmentId),
+      ...newTeams,
+    ]);
+    setTeamMembers((prev) => [
+      ...prev.filter((member) => member.assignment_id !== assignmentId),
+      ...newMembers,
+    ]);
   };
 
   if (isLoading) {
@@ -345,11 +364,12 @@ export default function ClassManagementPage() {
                 key={assignment.id}
                 assignment={assignment}
                 classId={classId}
-                teams={teams.filter((team) => team.assignment_id === assignment.id)}
+                teams={teams}
                 teamMemberMap={getTeamMemberMap(assignment.id)}
                 surveyResponses={surveyResponses}
                 enrolledStudentCount={enrolledStudents.length}
                 onRefresh={fetchClassData}
+                onTeamsUpdated={applyAssignmentTeams}
               />
             ))}
           </div>

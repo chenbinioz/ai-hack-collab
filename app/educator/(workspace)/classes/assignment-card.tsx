@@ -3,6 +3,13 @@
 import { useState, useEffect } from "react";
 import { createStudentBrowserClient } from "@/lib/supabase/student-browser-client";
 import { FeedbackAnalyticsPanel } from "@/app/educator/(workspace)/survey-results/feedback-analytics-panel";
+import { buildTeamSizeReport, countMembersPerTeam } from "@/lib/teams/ideal-size";
+import { MatchingFocusPreferencesPicker } from "@/components/matching-focus-preferences-picker";
+import { SkillPreferencesPicker } from "@/components/skill-preferences-picker";
+import {
+  normalizeAiPreferences,
+  type AiPreferences,
+} from "@/lib/matching/skill-preferences";
 import { AssignmentAttachmentsPanel } from "./assignment-attachments-panel";
 
 export interface Assignment {
@@ -11,13 +18,8 @@ export interface Assignment {
   title: string;
   description: string | null;
   due_date: string | null;
-  max_team_size: number;
-  ai_preferences: {
-    focus_skills: boolean;
-    focus_working_style: boolean;
-    focus_availability: boolean;
-    balance_diversity: boolean;
-  };
+  ideal_team_size: number;
+  ai_preferences: AiPreferences;
   sort_order: number;
   created_at: string;
   updated_at: string;
@@ -74,13 +76,52 @@ interface AssignmentCardProps {
   teamMemberMap: Map<string, string>;
   surveyResponses: SurveyResponse[];
   enrolledStudentCount: number;
-  onRefresh: () => void;
+  onRefresh: (options?: { silent?: boolean }) => void | Promise<void>;
+  onTeamsUpdated?: (
+    assignmentId: string,
+    teams: Team[],
+    teamMembers: Array<{ student_id: string; team_id: string; assignment_id: string }>,
+  ) => void;
 }
 
-const API_BASE_URL =
-  process.env.NODE_ENV === "development"
-    ? "http://localhost:8000"
-    : process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+function formatGenerateTeamsError(payload: unknown, fallback: string): string {
+  if (!payload || typeof payload !== "object") {
+    return fallback;
+  }
+
+  const record = payload as { error?: unknown; detail?: unknown };
+  if (typeof record.error === "string" && record.error.trim()) {
+    return record.error;
+  }
+  if (typeof record.detail === "string" && record.detail.trim()) {
+    return record.detail;
+  }
+  if (record.detail && typeof record.detail === "object") {
+    const detail = record.detail as { error?: unknown };
+    if (typeof detail.error === "string" && detail.error.trim()) {
+      return detail.error;
+    }
+  }
+
+  return fallback;
+}
+
+function formatFetchFailure(err: unknown, fallback: string): string {
+  if (!(err instanceof Error)) {
+    return fallback;
+  }
+
+  const message = err.message || fallback;
+  if (
+    message === "Load failed" ||
+    message === "Failed to fetch" ||
+    message.includes("NetworkError")
+  ) {
+    return "Team generation service is unavailable. Start the backend with: cd backend && uvicorn main:app --reload";
+  }
+
+  return message;
+}
 
 const factorLabelMap: Record<string, string> = {
   deadline_preference: "Deadline management",
@@ -164,27 +205,42 @@ export function AssignmentCard({
   surveyResponses,
   enrolledStudentCount,
   onRefresh,
+  onTeamsUpdated,
 }: AssignmentCardProps) {
   const supabase = createStudentBrowserClient();
 
   const [dueDateInput, setDueDateInput] = useState(
     assignment.due_date ? new Date(assignment.due_date).toISOString().slice(0, 16) : "",
   );
-  const [maxTeamSize, setMaxTeamSize] = useState(assignment.max_team_size);
-  const [aiPreferences, setAiPreferences] = useState(assignment.ai_preferences);
+  const [idealTeamSize, setIdealTeamSize] = useState(assignment.ideal_team_size);
+  const [aiPreferences, setAiPreferences] = useState(() =>
+    normalizeAiPreferences(assignment.ai_preferences),
+  );
   const [isSavingDueDate, setIsSavingDueDate] = useState(false);
   const [isSavingTeamSettings, setIsSavingTeamSettings] = useState(false);
   const [isGeneratingTeams, setIsGeneratingTeams] = useState(false);
   const [isResettingTeams, setIsResettingTeams] = useState(false);
+  const [generationSizeReport, setGenerationSizeReport] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     setDueDateInput(
       assignment.due_date ? new Date(assignment.due_date).toISOString().slice(0, 16) : "",
     );
-    setMaxTeamSize(assignment.max_team_size);
-    setAiPreferences(assignment.ai_preferences);
+    setIdealTeamSize(assignment.ideal_team_size);
+    setAiPreferences(normalizeAiPreferences(assignment.ai_preferences));
   }, [assignment]);
+
+  const assignmentTeams = teams.filter((team) => team.assignment_id === assignment.id);
+  const memberCounts = countMembersPerTeam(teamMemberMap, assignmentTeams);
+  const teamSizeReport = buildTeamSizeReport(
+    assignmentTeams,
+    memberCounts,
+    assignment.ideal_team_size,
+  );
+  const memberCountByTeamId = new Map(
+    teamSizeReport.teams.map((entry) => [entry.teamId, entry]),
+  );
 
   const completedResponses = surveyResponses.filter((response) => response.survey_completed);
 
@@ -201,7 +257,7 @@ export function AssignmentCard({
     return groups;
   }, new Map<string, typeof responsesWithTeam>());
 
-  const groupedTeams = teams.map((team) => ({
+  const groupedTeams = assignmentTeams.map((team) => ({
     id: team.id,
     name: team.name,
     responses: completedGroupedByTeam.get(team.id) ?? [],
@@ -237,7 +293,7 @@ export function AssignmentCard({
       setIsSavingDueDate(true);
       setError(null);
       await patchAssignment({ due_date: dueDateInput || null });
-      onRefresh();
+      await onRefresh({ silent: true });
     } catch (err: any) {
       setError(err.message || "Failed to update due date");
     } finally {
@@ -250,10 +306,10 @@ export function AssignmentCard({
       setIsSavingTeamSettings(true);
       setError(null);
       await patchAssignment({
-        max_team_size: maxTeamSize,
+        ideal_team_size: idealTeamSize,
         ai_preferences: aiPreferences,
       });
-      onRefresh();
+      await onRefresh({ silent: true });
     } catch (err: any) {
       setError(err.message || "Failed to update team settings");
     } finally {
@@ -271,28 +327,72 @@ export function AssignmentCard({
         throw new Error("You must be signed in to generate teams.");
       }
 
-      const response = await fetch(
-        `${API_BASE_URL}/educator/classes/${classId}/assignments/${assignment.id}/generate-teams`,
-        {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${session.access_token}`,
-            "Content-Type": "application/json",
-          },
+      // Persist the selected team settings before generating so the backend uses the latest size.
+      await patchAssignment({
+        ideal_team_size: idealTeamSize,
+        ai_preferences: aiPreferences,
+      });
+
+      // #region agent log
+      fetch("http://127.0.0.1:7309/ingest/b939d864-31de-4933-a1c2-ecb2537c7bfd", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "a3dd45" },
+        body: JSON.stringify({
+          sessionId: "a3dd45",
+          location: "assignment-card.tsx:generate-teams:settings",
+          message: "Saved team settings before generate",
+          data: { assignmentId: assignment.id, idealTeamSize },
+          timestamp: Date.now(),
+          hypothesisId: "H1,H2",
+        }),
+      }).catch(() => {});
+      // #endregion
+
+      const targetUrl = `/api/educator/classes/${classId}/assignments/${assignment.id}/generate-teams`;
+
+      const response = await fetch(targetUrl, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${session.access_token}`,
+          "Content-Type": "application/json",
         },
-      );
+      });
 
       const payload = await response.json().catch(() => ({}));
-      if (payload?.error || payload?.detail) {
-        throw new Error(payload.detail || payload.error);
-      }
+
       if (!response.ok) {
-        throw new Error(payload?.detail || payload?.error || "Failed to generate teams");
+        throw new Error(formatGenerateTeamsError(payload, "Failed to generate teams"));
+      }
+      if (payload?.error || payload?.detail) {
+        throw new Error(formatGenerateTeamsError(payload, "Failed to generate teams"));
       }
 
-      onRefresh();
-    } catch (err: any) {
-      setError(err.message || "Failed to generate teams");
+      if (Array.isArray(payload?.teams) && Array.isArray(payload?.team_members)) {
+        onTeamsUpdated?.(assignment.id, payload.teams, payload.team_members);
+      }
+
+      const report = payload?.team_size_report as
+        | { all_ideal?: boolean; ideal_team_size?: number; non_ideal_teams?: Array<{ team_index: number; size: number }> }
+        | undefined;
+      if (report?.all_ideal) {
+        setGenerationSizeReport(
+          `All teams are at the ideal size (${report.ideal_team_size ?? assignment.ideal_team_size}).`,
+        );
+      } else if (report?.non_ideal_teams?.length) {
+        const ideal = report.ideal_team_size ?? assignment.ideal_team_size;
+        const details = report.non_ideal_teams
+          .map((entry) => `Team ${entry.team_index} (${entry.size} members)`)
+          .join(", ");
+        setGenerationSizeReport(
+          `${report.non_ideal_teams.length} team${report.non_ideal_teams.length === 1 ? "" : "s"} are not the ideal size (${ideal}): ${details}.`,
+        );
+      } else {
+        setGenerationSizeReport(null);
+      }
+
+      await onRefresh({ silent: true });
+    } catch (err: unknown) {
+      setError(formatFetchFailure(err, "Failed to generate teams"));
     } finally {
       setIsGeneratingTeams(false);
     }
@@ -312,7 +412,8 @@ export function AssignmentCard({
         throw deleteError;
       }
 
-      onRefresh();
+      setGenerationSizeReport(null);
+      await onRefresh({ silent: true });
     } catch (err: any) {
       setError(err.message || "Failed to reset teams");
     } finally {
@@ -320,8 +421,12 @@ export function AssignmentCard({
     }
   };
 
-  const updatePreference = (key: keyof Assignment["ai_preferences"], value: boolean) => {
-    setAiPreferences((prev) => ({ ...prev, [key]: value }));
+  const updateWantedSkills = (wanted_skills: AiPreferences["wanted_skills"]) => {
+    setAiPreferences((prev) => ({
+      ...prev,
+      wanted_skills,
+      focus_skills: wanted_skills.length > 0,
+    }));
   };
 
   return (
@@ -368,13 +473,13 @@ export function AssignmentCard({
         <h3 className="text-sm font-semibold text-foreground">Team settings</h3>
         <div className="mt-4 space-y-4">
           <div>
-            <label htmlFor={`max_team_size_${assignment.id}`} className="block text-sm font-medium text-foreground">
-              Maximum team size
+            <label htmlFor={`ideal_team_size_${assignment.id}`} className="block text-sm font-medium text-foreground">
+              Ideal team size
             </label>
             <select
-              id={`max_team_size_${assignment.id}`}
-              value={maxTeamSize}
-              onChange={(e) => setMaxTeamSize(parseInt(e.target.value))}
+              id={`ideal_team_size_${assignment.id}`}
+              value={idealTeamSize}
+              onChange={(e) => setIdealTeamSize(parseInt(e.target.value))}
               className="mt-1 block w-full max-w-xs rounded-xl border border-black/10 bg-background px-3 py-2 text-sm shadow-sm focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand dark:border-white/15"
             >
               {[2, 3, 4, 5, 6, 7, 8, 9, 10].map((size) => (
@@ -383,27 +488,23 @@ export function AssignmentCard({
                 </option>
               ))}
             </select>
+            <p className="mt-1 text-xs text-muted">
+              Teams will be generated to match this size when possible.
+            </p>
           </div>
 
           <div>
             <p className="text-sm font-medium text-foreground">AI matching preferences</p>
-            <div className="mt-3 space-y-2">
-              {[
-                { key: "focus_skills" as const, label: "Skill complementarity" },
-                { key: "focus_working_style" as const, label: "Working style compatibility" },
-                { key: "focus_availability" as const, label: "Schedule compatibility" },
-                { key: "balance_diversity" as const, label: "Balance team diversity" },
-              ].map(({ key, label }) => (
-                <label key={key} className="flex cursor-pointer items-center gap-2">
-                  <input
-                    type="checkbox"
-                    checked={aiPreferences[key]}
-                    onChange={(e) => updatePreference(key, e.target.checked)}
-                    className="h-4 w-4 rounded border-black/20 text-brand focus:ring-brand dark:border-white/20"
-                  />
-                  <span className="text-sm text-foreground">{label}</span>
-                </label>
-              ))}
+            <div className="mt-3 space-y-4">
+              <MatchingFocusPreferencesPicker
+                preferences={aiPreferences}
+                onChange={setAiPreferences}
+              />
+
+              <SkillPreferencesPicker
+                selected={aiPreferences.wanted_skills}
+                onChange={updateWantedSkills}
+              />
             </div>
           </div>
 
@@ -423,7 +524,7 @@ export function AssignmentCard({
           Generate AI-matched teams for this assignment based on student survey responses.
         </p>
 
-        {teams.length > 0 ? (
+        {assignmentTeams.length > 0 ? (
           <div className="mt-4 space-y-4">
             <div className="flex items-center gap-2 text-green-600 dark:text-green-400">
               <svg className="h-5 w-5" fill="currentColor" viewBox="0 0 20 20">
@@ -433,7 +534,7 @@ export function AssignmentCard({
                   clipRule="evenodd"
                 />
               </svg>
-              <span className="text-sm font-medium">Teams generated ({teams.length} teams)</span>
+              <span className="text-sm font-medium">Teams generated ({assignmentTeams.length} teams)</span>
             </div>
             <div className="flex flex-col gap-3 sm:flex-row">
               <button
@@ -469,22 +570,64 @@ export function AssignmentCard({
         )}
       </div>
 
+      {generationSizeReport && (
+        <p
+          className={`rounded-xl border px-3 py-2 text-sm ${
+            generationSizeReport.startsWith("All teams")
+              ? "border-green-200 bg-green-50 text-green-800 dark:border-green-800 dark:bg-green-950/30 dark:text-green-200"
+              : "border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-200"
+          }`}
+        >
+          {generationSizeReport}
+        </p>
+      )}
+
       {error && (
         <p className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-800 dark:bg-red-950/30 dark:text-red-300">
           {error}
         </p>
       )}
 
-      {teams.length > 0 && (
+      {assignmentTeams.length > 0 && (
         <div>
           <h3 className="text-sm font-semibold text-foreground">Generated teams</h3>
+          {teamSizeReport.summaryText ? (
+            <p
+              className={`mt-2 rounded-xl border px-3 py-2 text-sm ${
+                teamSizeReport.allIdeal
+                  ? "border-green-200 bg-green-50 text-green-800 dark:border-green-800 dark:bg-green-950/30 dark:text-green-200"
+                  : "border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-200"
+              }`}
+            >
+              {teamSizeReport.summaryText}
+            </p>
+          ) : null}
           <div className="mt-4 grid gap-4 md:grid-cols-2">
-            {teams.map((team) => (
+            {assignmentTeams.map((team) => {
+              const sizeEntry = memberCountByTeamId.get(team.id);
+              const isIdeal = sizeEntry?.isIdeal ?? true;
+              return (
               <div
                 key={team.id}
-                className="rounded-lg border border-black/5 bg-white p-4 dark:border-white/10 dark:bg-zinc-900"
+                className={`rounded-lg border p-4 ${
+                  isIdeal
+                    ? "border-black/5 bg-white dark:border-white/10 dark:bg-zinc-900"
+                    : "border-amber-200 bg-amber-50/50 dark:border-amber-800 dark:bg-amber-950/20"
+                }`}
               >
-                <h4 className="mb-2 font-semibold text-foreground">{team.name}</h4>
+                <div className="mb-2 flex items-center justify-between gap-2">
+                  <h4 className="font-semibold text-foreground">{team.name}</h4>
+                  <span
+                    className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-medium ${
+                      isIdeal
+                        ? "bg-green-100 text-green-800 dark:bg-green-950/40 dark:text-green-200"
+                        : "bg-amber-100 text-amber-800 dark:bg-amber-950/40 dark:text-amber-200"
+                    }`}
+                  >
+                    {sizeEntry?.size ?? 0} member{(sizeEntry?.size ?? 0) === 1 ? "" : "s"}
+                    {!isIdeal ? ` (ideal: ${idealTeamSize})` : ""}
+                  </span>
+                </div>
                 <p className="mb-3 text-sm text-muted">{team.reason}</p>
 
                 {team.match_explanation?.factor_weights ? (
@@ -538,7 +681,8 @@ export function AssignmentCard({
 
                 <p className="text-xs text-muted">Created {new Date(team.created_at).toLocaleDateString()}</p>
               </div>
-            ))}
+              );
+            })}
           </div>
         </div>
       )}
@@ -558,7 +702,7 @@ export function AssignmentCard({
           <div className="mt-4 rounded-2xl border border-dashed border-black/15 bg-black/[0.02] p-6 text-center dark:border-white/20 dark:bg-white/[0.03]">
             <p className="text-sm text-muted">No completed surveys yet for this class.</p>
           </div>
-        ) : teams.length > 0 ? (
+        ) : assignmentTeams.length > 0 ? (
           <div className="mt-4 space-y-4">
             {groupedTeams.map((teamGroup) =>
               teamGroup.responses.length > 0 ? (

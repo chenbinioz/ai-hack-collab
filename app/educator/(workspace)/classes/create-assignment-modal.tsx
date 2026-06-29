@@ -2,6 +2,12 @@
 
 import { useState } from "react";
 import { createStudentBrowserClient } from "@/lib/supabase/student-browser-client";
+import { MatchingFocusPreferencesPicker } from "@/components/matching-focus-preferences-picker";
+import { SkillPreferencesPicker } from "@/components/skill-preferences-picker";
+import {
+  DEFAULT_AI_PREFERENCES,
+  type AiPreferences,
+} from "@/lib/matching/skill-preferences";
 import {
   AssignmentAttachmentsPanel,
   uploadPendingAssignmentFiles,
@@ -17,13 +23,8 @@ interface AssignmentFormData {
   title: string;
   description: string;
   due_date: string;
-  max_team_size: number;
-  ai_preferences: {
-    focus_skills: boolean;
-    focus_working_style: boolean;
-    focus_availability: boolean;
-    balance_diversity: boolean;
-  };
+  ideal_team_size: number;
+  ai_preferences: AiPreferences;
 }
 
 export function CreateAssignmentModal({
@@ -39,23 +40,19 @@ export function CreateAssignmentModal({
     title: "",
     description: "",
     due_date: "",
-    max_team_size: 3,
-    ai_preferences: {
-      focus_skills: true,
-      focus_working_style: true,
-      focus_availability: true,
-      balance_diversity: true,
-    },
+    ideal_team_size: 3,
+    ai_preferences: { ...DEFAULT_AI_PREFERENCES },
   });
 
   const supabase = createStudentBrowserClient();
 
-  const updatePreference = (key: keyof AssignmentFormData["ai_preferences"], value: boolean) => {
+  const updateWantedSkills = (wanted_skills: AiPreferences["wanted_skills"]) => {
     setFormData((prev) => ({
       ...prev,
       ai_preferences: {
         ...prev.ai_preferences,
-        [key]: value,
+        wanted_skills,
+        focus_skills: wanted_skills.length > 0,
       },
     }));
   };
@@ -176,14 +173,14 @@ export function CreateAssignmentModal({
             </div>
 
             <div>
-              <label htmlFor="max_team_size" className="block text-sm font-medium text-foreground">
-                Maximum Team Size
+              <label htmlFor="ideal_team_size" className="block text-sm font-medium text-foreground">
+                Ideal team size
               </label>
               <select
-                id="max_team_size"
-                value={formData.max_team_size}
+                id="ideal_team_size"
+                value={formData.ideal_team_size}
                 onChange={(e) =>
-                  setFormData((prev) => ({ ...prev, max_team_size: parseInt(e.target.value) }))
+                  setFormData((prev) => ({ ...prev, ideal_team_size: parseInt(e.target.value) }))
                 }
                 className="mt-1 block w-full rounded-xl border border-black/10 bg-background px-3 py-2 text-sm shadow-sm focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand dark:border-white/15"
               >
@@ -193,6 +190,9 @@ export function CreateAssignmentModal({
                   </option>
                 ))}
               </select>
+              <p className="mt-1 text-xs text-muted">
+                Teams will be generated to match this size when possible.
+              </p>
             </div>
           </div>
 
@@ -202,42 +202,18 @@ export function CreateAssignmentModal({
               Choose what the AI should focus on when creating teams for this assignment.
             </p>
 
-            <div className="space-y-3">
-              {[
-                {
-                  key: "focus_skills" as const,
-                  label: "Skill complementarity",
-                  description: "Match students with different technical skills",
-                },
-                {
-                  key: "focus_working_style" as const,
-                  label: "Working style compatibility",
-                  description: "Consider communication and deadline preferences",
-                },
-                {
-                  key: "focus_availability" as const,
-                  label: "Schedule compatibility",
-                  description: "Match students with similar availability",
-                },
-                {
-                  key: "balance_diversity" as const,
-                  label: "Balance team diversity",
-                  description: "Create diverse teams with varied backgrounds",
-                },
-              ].map(({ key, label, description }) => (
-                <label key={key} className="flex cursor-pointer items-start gap-3">
-                  <input
-                    type="checkbox"
-                    checked={formData.ai_preferences[key]}
-                    onChange={(e) => updatePreference(key, e.target.checked)}
-                    className="mt-0.5 h-4 w-4 rounded border-black/20 text-brand focus:ring-brand dark:border-white/20"
-                  />
-                  <div className="flex-1">
-                    <div className="text-sm font-medium text-foreground">{label}</div>
-                    <div className="text-xs text-muted">{description}</div>
-                  </div>
-                </label>
-              ))}
+            <div className="space-y-4">
+              <MatchingFocusPreferencesPicker
+                preferences={formData.ai_preferences}
+                onChange={(ai_preferences) =>
+                  setFormData((prev) => ({ ...prev, ai_preferences }))
+                }
+              />
+
+              <SkillPreferencesPicker
+                selected={formData.ai_preferences.wanted_skills}
+                onChange={updateWantedSkills}
+              />
             </div>
           </div>
 

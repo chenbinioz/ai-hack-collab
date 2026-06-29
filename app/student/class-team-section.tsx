@@ -17,7 +17,7 @@ interface Assignment {
   title: string;
   description: string | null;
   due_date: string | null;
-  max_team_size: number;
+  ideal_team_size: number;
   team_id: string | null;
 }
 
@@ -142,7 +142,7 @@ function AssignmentSection({
       )}
 
       <div className="mt-2 flex items-center gap-4 text-xs text-muted">
-        <span>Max Team Size: {assignment.max_team_size}</span>
+        <span>Ideal team size: {assignment.ideal_team_size}</span>
       </div>
       <div className="mt-3 rounded-xl border border-black/10 bg-background px-3 py-2 text-sm dark:border-white/15">
         <p className="text-xs uppercase tracking-wide text-muted">Due date</p>

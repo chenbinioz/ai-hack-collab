@@ -3,7 +3,7 @@
 
 -- 1. Extend existing assignments table
 ALTER TABLE public.assignments
-ADD COLUMN IF NOT EXISTS max_team_size integer DEFAULT 3;
+ADD COLUMN IF NOT EXISTS ideal_team_size integer DEFAULT 3;
 
 ALTER TABLE public.assignments
 ADD COLUMN IF NOT EXISTS ai_preferences jsonb DEFAULT '{
@@ -20,11 +20,11 @@ DO $$
 BEGIN
   IF NOT EXISTS (
     SELECT 1 FROM pg_constraint
-    WHERE conname = 'assignments_max_team_size_check'
+    WHERE conname = 'assignments_ideal_team_size_check'
   ) THEN
     ALTER TABLE public.assignments
-    ADD CONSTRAINT assignments_max_team_size_check
-    CHECK (max_team_size >= 2 AND max_team_size <= 10);
+    ADD CONSTRAINT assignments_ideal_team_size_check
+    CHECK (ideal_team_size >= 2 AND ideal_team_size <= 10);
   END IF;
 END $$;
 
@@ -102,7 +102,7 @@ ADD COLUMN IF NOT EXISTS assignment_id uuid REFERENCES public.assignments(id) ON
 -- 6. Backfill assignment settings from classes
 UPDATE public.assignments a
 SET
-  max_team_size = COALESCE(a.max_team_size, c.max_team_size, 3),
+  ideal_team_size = COALESCE(a.ideal_team_size, c.ideal_team_size, 3),
   ai_preferences = COALESCE(
     a.ai_preferences,
     c.ai_preferences,
@@ -119,14 +119,14 @@ WHERE a.class_id = c.id;
 
 -- Create default assignment for classes without one
 INSERT INTO public.assignments (
-  class_id, title, description, due_date, max_team_size, ai_preferences, sort_order, created_by
+  class_id, title, description, due_date, ideal_team_size, ai_preferences, sort_order, created_by
 )
 SELECT
   c.id,
   'Project 1',
   COALESCE(c.description, ''),
   c.coursework_deadline,
-  COALESCE(c.max_team_size, 3),
+  COALESCE(c.ideal_team_size, 3),
   COALESCE(c.ai_preferences, '{
     "focus_skills": true,
     "focus_working_style": true,
@@ -272,7 +272,7 @@ RETURNS TABLE (
   title text,
   description text,
   due_date timestamptz,
-  max_team_size integer,
+  ideal_team_size integer,
   ai_preferences jsonb,
   sort_order integer,
   team_id uuid
@@ -287,7 +287,7 @@ AS $$
     a.title,
     a.description,
     a.due_date,
-    a.max_team_size,
+    a.ideal_team_size,
     a.ai_preferences,
     a.sort_order,
     tm.team_id
@@ -451,7 +451,7 @@ CREATE POLICY "Users can send messages to their team"
 
 -- 14. Drop class-level fields moved to assignments
 ALTER TABLE public.classes DROP COLUMN IF EXISTS coursework_deadline;
-ALTER TABLE public.classes DROP COLUMN IF EXISTS max_team_size;
+ALTER TABLE public.classes DROP COLUMN IF EXISTS ideal_team_size;
 ALTER TABLE public.classes DROP COLUMN IF EXISTS ai_preferences;
 
 DROP INDEX IF EXISTS idx_classes_coursework_deadline;

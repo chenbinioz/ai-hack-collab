@@ -267,9 +267,10 @@ class AssignmentCreateRequest(BaseModel):
     title: str
     description: str = ""
     due_date: Optional[str] = None
-    max_team_size: int = 3
+    ideal_team_size: int = 3
     ai_preferences: dict = {
-        "focus_skills": True,
+        "wanted_skills": [],
+        "focus_skills": False,
         "focus_working_style": True,
         "focus_availability": True,
         "balance_diversity": True
@@ -280,7 +281,7 @@ class AssignmentUpdateRequest(BaseModel):
     title: Optional[str] = None
     description: Optional[str] = None
     due_date: Optional[str] = None
-    max_team_size: Optional[int] = None
+    ideal_team_size: Optional[int] = None
     ai_preferences: Optional[dict] = None
     sort_order: Optional[int] = None
 
@@ -735,7 +736,7 @@ def create_assignment(class_id: str, request: Request, assignment_data: Assignme
             "title": assignment_data.title,
             "description": assignment_data.description,
             "due_date": assignment_data.due_date,
-            "max_team_size": assignment_data.max_team_size,
+            "ideal_team_size": assignment_data.ideal_team_size,
             "ai_preferences": assignment_data.ai_preferences,
             "sort_order": assignment_data.sort_order,
             "created_by": educator_id,
@@ -921,10 +922,44 @@ def generate_assignment_teams(class_id: str, assignment_id: str, request: Reques
         assignment_goal_hint = (
             assignment_data.get("description") or assignment_data.get("title") or class_data.get("name") or ""
         ).strip()
+        ideal_team_size = assignment_data.get("ideal_team_size") or assignment_data.get("max_team_size", 3)
+        try:
+            ideal_team_size = max(2, min(10, int(ideal_team_size)))
+        except (TypeError, ValueError):
+            ideal_team_size = 3
+        # #region agent log
+        try:
+            import json as _json
+            from pathlib import Path as _Path
+            with (_Path(__file__).resolve().parent.parent / ".cursor" / "debug-a3dd45.log").open(
+                "a", encoding="utf-8"
+            ) as log_file:
+                log_file.write(
+                    _json.dumps(
+                        {
+                            "sessionId": "a3dd45",
+                            "timestamp": int(__import__("time").time() * 1000),
+                            "location": "main.py:generate_assignment_teams",
+                            "message": "Ideal team size for generation",
+                            "data": {
+                                "assignment_id": assignment_id,
+                                "ideal_team_size": ideal_team_size,
+                                "assignment_ideal_team_size": assignment_data.get("ideal_team_size"),
+                                "assignment_max_team_size": assignment_data.get("max_team_size"),
+                            },
+                            "hypothesisId": "H1,H2",
+                        }
+                    )
+                    + "\n"
+                )
+        except Exception:
+            pass
+        # #endregion
         class_context = {
             "coursework_deadline": assignment_data.get("due_date"),
             "project_goal_hint": assignment_goal_hint,
-            "max_team_size": assignment_data.get("max_team_size", 3),
+            "ideal_team_size": ideal_team_size,
+            "student_count": len(valid_students),
         }
 
         matches = match_students(
@@ -948,12 +983,14 @@ def generate_assignment_teams(class_id: str, assignment_id: str, request: Reques
                 group["class_id"] = class_id
                 group["assignment_id"] = assignment_id
 
-        created_team_ids = save_teams(
+        save_result = save_teams(
             matches,
             class_id,
-            max_team_size=assignment_data.get("max_team_size", 3),
+            ideal_team_size=ideal_team_size,
             assignment_id=assignment_id,
-        ) or []
+        ) or {"created_team_ids": [], "team_size_report": None}
+        created_team_ids = save_result.get("created_team_ids", [])
+        team_size_report = save_result.get("team_size_report")
 
         if existing_team_ids:
             stale_team_ids = [tid for tid in existing_team_ids if tid not in created_team_ids]
@@ -963,7 +1000,21 @@ def generate_assignment_teams(class_id: str, assignment_id: str, request: Reques
                 except Exception as del_err:
                     print(f"Warning: Failed to delete old teams: {del_err}")
 
-        return {"matches": matches, "class_id": class_id, "assignment_id": assignment_id}
+        teams_result = admin_supabase.table("teams").select("*").eq(
+            "assignment_id", assignment_id
+        ).order("created_at").execute()
+        members_result = admin_supabase.table("team_members").select(
+            "student_id, team_id, assignment_id"
+        ).eq("assignment_id", assignment_id).execute()
+
+        return {
+            "matches": matches,
+            "class_id": class_id,
+            "assignment_id": assignment_id,
+            "team_size_report": team_size_report,
+            "teams": teams_result.data or [],
+            "team_members": members_result.data or [],
+        }
 
     except Exception as e:
         print(f"Error generating assignment teams: {e}")
