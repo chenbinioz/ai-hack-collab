@@ -7,6 +7,9 @@ __pycache__/
 .DS_Store
 cohort.db
 
+# Local example analytics CSVs (too large for GitHub)
+Cohort Connect Data Files/
+
 # Python
 *.egg-info/
 dist/
