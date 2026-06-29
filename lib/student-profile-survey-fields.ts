@@ -5,6 +5,7 @@
 export const STUDENT_PROFILE_SURVEY_COLUMNS_ORDERED = [
   // Page 1 — Information
   "survey_name",
+  "survey_external_student_id",
   "survey_degree_title",
   "survey_year",
   "survey_alevel_or_equivalent_titles",

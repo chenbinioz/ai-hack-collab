@@ -5,6 +5,7 @@ export type CompletedStudentSurveyRow = {
   student_id: string;
   email: string;
   survey_name: string | null;
+  survey_external_student_id: string | null;
   survey_degree_title: string | null;
   survey_year: number | null;
   survey_alevel_or_equivalent_titles: unknown;

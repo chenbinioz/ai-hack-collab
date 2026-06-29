@@ -23,6 +23,7 @@ const CONFIDENCE_SCALE_HINT = "1 = not confident at all · 5 = very confident";
 
 type SurveyFormState = {
   name: string;
+  externalStudentIdDigits: string;
   degreeTitle: string;
   year: "" | (typeof SURVEY_YEAR_OPTIONS)[number];
   alevelTitles: string[];
@@ -122,6 +123,7 @@ const APPROACH_ITEMS: {
 function defaultSurveyFormState(): SurveyFormState {
   return {
     name: "",
+    externalStudentIdDigits: "",
     degreeTitle: "",
     year: "",
     alevelTitles: [],
@@ -277,6 +279,10 @@ export function StudentProfileSurveyPage() {
       setPageError("Enter your name.");
       return false;
     }
+    if (!/^[0-9]{8}$/.test(form.externalStudentIdDigits)) {
+      setPageError("Enter your 8-digit student ID number.");
+      return false;
+    }
     if (!form.degreeTitle) {
       setPageError("Select your degree title.");
       return false;
@@ -334,6 +340,7 @@ export function StudentProfileSurveyPage() {
       const supabase = createStudentBrowserClient();
       const p_payload = {
         survey_name: form.name.trim(),
+        survey_external_student_id: form.externalStudentIdDigits,
         survey_degree_title: form.degreeTitle,
         survey_year: form.year,
         survey_alevel_or_equivalent_titles: alevelSorted,
@@ -466,6 +473,40 @@ export function StudentProfileSurveyPage() {
                   className={inputClassName}
                   placeholder="Your name"
                 />
+              </div>
+
+              <div>
+                <label htmlFor="survey-external-student-id" className={labelClassName}>
+                  Student ID number
+                </label>
+                <p className="mt-1 text-xs text-muted">
+                  Your university student ID is required to link external learning data for better team matching.
+                </p>
+                <div className="mt-1.5 flex items-center gap-1">
+                  <span className="rounded-l-xl border border-r-0 border-black/10 bg-black/[0.04] px-3 py-2.5 text-sm font-medium text-foreground dark:border-white/15 dark:bg-white/[0.06]">
+                    P
+                  </span>
+                  <input
+                    id="survey-external-student-id"
+                    name="survey_external_student_id"
+                    type="text"
+                    inputMode="numeric"
+                    pattern="[0-9]{8}"
+                    maxLength={8}
+                    value={form.externalStudentIdDigits}
+                    onChange={(e) => {
+                      const digits = e.target.value.replace(/\D/g, "").slice(0, 8);
+                      setForm((p) => ({ ...p, externalStudentIdDigits: digits }));
+                    }}
+                    disabled={disabledControls}
+                    className={`${inputClassName} mt-0 rounded-l-none`}
+                    placeholder="12345678"
+                    aria-describedby="survey-external-student-id-hint"
+                  />
+                </div>
+                <p id="survey-external-student-id-hint" className="mt-1 text-xs text-muted">
+                  Enter exactly 8 digits (the &ldquo;P&rdquo; prefix is added automatically).
+                </p>
               </div>
 
               <div>

@@ -1,15 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@/lib/supabase/server-client";
+import { resolveRequestUser } from "@/lib/auth/request-user";
+import { createClientFromRequest } from "@/lib/supabase/server-client";
 
 export async function PATCH(
   request: NextRequest,
   { params }: { params: Promise<{ classId: string }> },
 ) {
   try {
-    const supabase = await createClient();
+    const supabase = await createClientFromRequest(request);
     const { classId } = await params;
 
-    const { data: { user }, error: userError } = await supabase.auth.getUser();
+    const { user, error: userError } = await resolveRequestUser(supabase, request);
     if (userError || !user) {
       return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
     }

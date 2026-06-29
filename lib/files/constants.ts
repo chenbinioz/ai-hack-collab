@@ -18,6 +18,7 @@ export const ALLOWED_MIME_TYPES = [
 
 export const ASSIGNMENT_FILES_BUCKET = "assignment-files";
 export const CHAT_FILES_BUCKET = "chat-files";
+export const CLASS_EXTERNAL_DATA_BUCKET = "class-external-data";
 
 export const IMAGE_MIME_TYPES = new Set([
   "image/png",
