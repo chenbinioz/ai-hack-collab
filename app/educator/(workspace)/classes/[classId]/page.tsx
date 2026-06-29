@@ -11,7 +11,6 @@ import {
   type Assignment,
   type SurveyResponse,
 } from "@/app/educator/(workspace)/classes/assignment-card";
-import { type DraftTeam } from "./draft-teams-board";
 import { CreateAssignmentModal } from "@/app/educator/(workspace)/classes/create-assignment-modal";
 import { ClassFeedbackOverview } from "@/app/educator/(workspace)/classes/class-feedback-overview";
 import { ClassExternalDataPanel } from "@/app/educator/(workspace)/classes/class-external-data-panel";
