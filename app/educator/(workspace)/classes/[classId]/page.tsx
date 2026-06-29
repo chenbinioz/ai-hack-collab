@@ -1,5 +1,7 @@
 "use client";
 
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+
 import { useState, useEffect } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { createStudentBrowserClient } from "@/lib/supabase/student-browser-client";
@@ -10,6 +12,7 @@ import {
 } from "@/app/educator/(workspace)/classes/assignment-card";
 import { CreateAssignmentModal } from "@/app/educator/(workspace)/classes/create-assignment-modal";
 import { ClassFeedbackOverview } from "@/app/educator/(workspace)/classes/class-feedback-overview";
+import { DraftTeamsBoard, DraftTeam } from "./draft-teams-board";
 
 interface ClassDetails {
   id: string;
@@ -60,10 +63,15 @@ export default function ClassManagementPage() {
   const [enrolledStudents, setEnrolledStudents] = useState<EnrolledStudent[]>([]);
   const [teams, setTeams] = useState<Team[]>([]);
   const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
+  const [drafts, setDrafts] = useState<DraftTeam[]>([]);
   const [surveyResponses, setSurveyResponses] = useState<SurveyResponse[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showCreateAssignmentModal, setShowCreateAssignmentModal] = useState(false);
+  const [isSavingDeadline, setIsSavingDeadline] = useState(false);
+  const [isGeneratingTeams, setIsGeneratingTeams] = useState(false);
+  const [isResettingTeams, setIsResettingTeams] = useState(false);
+  const [deadlineInput, setDeadlineInput] = useState("");
 
   const supabase = createStudentBrowserClient();
 
@@ -224,6 +232,28 @@ export default function ClassManagementPage() {
       } else {
         setTeamMembers([]);
       }
+      // Fetch draft teams for this class (best-effort: don't block page if backend is down)
+      try {
+        const draftController = new AbortController();
+        const draftTimeout = setTimeout(() => draftController.abort(), 5000);
+        const draftsResponse = await fetch(`${API_BASE_URL}/educator/classes/${classId}/draft-teams`, {
+          headers: {
+            Authorization: `Bearer ${session.access_token}`,
+          },
+          signal: draftController.signal,
+        });
+        clearTimeout(draftTimeout);
+        if (draftsResponse.ok) {
+          const draftsData = await draftsResponse.json();
+          setDrafts(draftsData.drafts || []);
+        }
+      } catch (draftErr: any) {
+        // Backend may not be running — silently ignore, drafts just won't show
+        if (draftErr.name !== "AbortError") {
+          console.warn("Could not fetch draft teams (is the backend running?):", draftErr.message);
+        }
+      }
+
     } catch (err: any) {
       console.error("Error fetching class data:", err);
       setError(err.message || "Failed to load class data");
@@ -232,12 +262,192 @@ export default function ClassManagementPage() {
     }
   };
 
+  const completedResponses = surveyResponses.filter((r) => r.survey_completed);
+
   const getTeamMemberMap = (assignmentId: string) => {
     const map = new Map<string, string>();
     teamMembers
       .filter((member) => member.assignment_id === assignmentId)
       .forEach((member) => map.set(member.student_id, member.team_id));
     return map;
+  };
+
+  const handleSaveDeadline = async () => {
+    try {
+      setIsSavingDeadline(true);
+      setError(null);
+
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) {
+        throw new Error("You must be signed in to update deadline.");
+      }
+
+      const response = await fetch(`/api/educator/classes/${classId}`, {
+        method: "PATCH",
+        headers: {
+          Authorization: `Bearer ${session.access_token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          coursework_deadline: deadlineInput || null,
+        }),
+      });
+
+      const payload = await response.json();
+      if (!response.ok) {
+        throw new Error(payload.error || "Failed to update deadline");
+      }
+
+      await fetchClassData();
+    } catch (err: any) {
+      console.error("Error saving deadline:", err);
+      setError(err.message || "Failed to update deadline");
+    } finally {
+      setIsSavingDeadline(false);
+    }
+  };
+
+  const getApiErrorMessage = (payload: any) => {
+    if (!payload) {
+      return null;
+    }
+
+    if (typeof payload.detail === "string") {
+      return payload.detail;
+    }
+
+    if (payload.detail && typeof payload.detail === "object") {
+      return payload.detail.error || payload.detail.redirect_endpoint || JSON.stringify(payload.detail);
+    }
+
+    return payload.error || null;
+  };
+
+  const handleGenerateTeams = async () => {
+    try {
+      setIsGeneratingTeams(true);
+      setError(null);
+
+      const assignmentId = assignments[0]?.id;
+      if (!assignmentId) {
+        throw new Error("No assignment available to generate teams.");
+      }
+
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) {
+        throw new Error("You must be signed in to generate teams.");
+      }
+
+      const response = await fetch(
+        `${API_BASE_URL}/educator/classes/${classId}/assignments/${assignmentId}/generate-teams`,
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${session.access_token}`,
+            "Content-Type": "application/json",
+          },
+        },
+      );
+
+      const payload = await response.json().catch(() => ({}));
+      const apiError = getApiErrorMessage(payload);
+
+      if (apiError) {
+        throw new Error(apiError);
+      }
+
+      if (!response.ok) {
+        throw new Error(apiError || "Failed to generate teams");
+      }
+
+      // Refresh data after team generation
+      await fetchClassData();
+    } catch (err: any) {
+      console.error("Error generating teams:", err);
+      setError(err.message || "Failed to generate teams");
+    } finally {
+      setIsGeneratingTeams(false);
+    }
+  };
+
+  const handleResetTeams = async () => {
+    try {
+      setIsResettingTeams(true);
+      setError(null);
+
+      // Reset teams by setting team_id to null for all students in this class
+      const { error: resetError } = await supabase
+        .from("student_profiles")
+        .update({ team_id: null })
+        .in("id", enrolledStudents.map(s => s.id));
+
+      if (resetError) {
+        throw resetError;
+      }
+
+      // Delete teams for this class
+      const { error: deleteError } = await supabase
+        .from("teams")
+        .delete()
+        .eq("class_id", classId);
+
+      if (deleteError) {
+        throw deleteError;
+      }
+
+      // Refresh data after reset
+      await fetchClassData();
+    } catch (err: any) {
+      console.error("Error resetting teams:", err);
+      setError(err.message || "Failed to reset teams");
+    } finally {
+      setIsResettingTeams(false);
+    }
+  };
+
+  const handleSwapDraft = async (studentId: string, fromDraftId: string, toDraftId: string, reason: string) => {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) return;
+    const response = await fetch(`${API_BASE_URL}/educator/classes/${classId}/draft-teams/swap`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${session.access_token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        student_id: studentId,
+        from_draft_team_id: fromDraftId,
+        to_draft_team_id: toDraftId,
+        reason: reason,
+      }),
+    });
+    if (!response.ok) throw new Error("Swap failed");
+    await fetchClassData();
+  };
+
+  const handlePublishTeams = async () => {
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) throw new Error("Not authenticated");
+
+      const response = await fetch(`${API_BASE_URL}/educator/classes/${classId}/publish-teams`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${session.access_token}`,
+        },
+      });
+
+      const payload = await response.json().catch(() => ({}));
+      const apiError = getApiErrorMessage(payload);
+      if (apiError) throw new Error(apiError);
+      if (!response.ok) throw new Error(apiError || "Publish failed");
+
+      await fetchClassData();
+    } catch (err: any) {
+      console.error("Error publishing teams:", err);
+      setError(err.message || "Failed to publish teams");
+      throw err;
+    }
   };
 
   if (isLoading) {
@@ -328,6 +538,55 @@ export default function ClassManagementPage() {
           </button>
         </div>
 
+        {enrolledStudents.length < 2 && (
+          <p className="mt-2 text-sm text-amber-600 dark:text-amber-400">
+            Need at least 2 students enrolled to generate teams.
+          </p>
+        )}
+
+        {error && (
+          <p className="mt-3 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-800 dark:bg-red-950/30 dark:text-red-300">
+            {error}
+          </p>
+        )}
+
+        <div className="mt-8">
+          <ClassFeedbackOverview classId={classId} />
+        </div>
+      </div>
+
+      {/* Draft Teams Section */}
+      {drafts.length > 0 && (
+        <div className="rounded-2xl border border-black/10 bg-surface p-6 shadow-sm dark:border-white/10 mt-8">
+          <DraftTeamsBoard
+            classId={classId}
+            drafts={drafts}
+            studentsMap={
+              Object.fromEntries(surveyResponses.map(r => [
+                r.student_id,
+                { id: r.student_id, name: r.name, email: r.email, workload: r.survey_approach_heavy_workload, coding: r.survey_confidence_coding }
+              ]))
+            }
+            onSwap={handleSwapDraft}
+            onPublish={handlePublishTeams}
+          />
+        </div>
+      )}
+
+      {/* Class Survey Responses */}
+      <div className="rounded-2xl border border-black/10 bg-surface p-6 shadow-sm dark:border-white/10">
+        <div className="flex items-center justify-between gap-4">
+          <div>
+            <h2 className="text-lg font-semibold text-foreground">Class survey responses</h2>
+            <p className="mt-2 text-sm text-muted">
+              Student profile survey answers for the current class only.
+            </p>
+          </div>
+          <p className="text-sm text-muted">
+            {completedResponses.length} of {surveyResponses.length} completed
+          </p>
+        </div>
+
         {assignments.length === 0 ? (
           <div className="rounded-2xl border border-dashed border-black/15 bg-black/[0.02] p-8 text-center dark:border-white/20 dark:bg-white/[0.03]">
             <p className="text-sm text-muted">No assignments yet. Add one to set deadlines and generate teams.</p>
@@ -416,8 +675,6 @@ export default function ClassManagementPage() {
         )}
       </div>
 
-      <ClassFeedbackOverview classId={classId} />
-
       {showCreateAssignmentModal && (
         <CreateAssignmentModal
           classId={classId}
@@ -429,5 +686,5 @@ export default function ClassManagementPage() {
         />
       )}
     </div>
-  );
+  )
 }
