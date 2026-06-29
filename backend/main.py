@@ -273,9 +273,10 @@ class AssignmentCreateRequest(BaseModel):
     title: str
     description: str = ""
     due_date: Optional[str] = None
-    max_team_size: int = 3
+    ideal_team_size: int = 3
     ai_preferences: dict = {
-        "focus_skills": True,
+        "wanted_skills": [],
+        "focus_skills": False,
         "focus_working_style": True,
         "focus_availability": True,
         "balance_diversity": True
@@ -286,7 +287,7 @@ class AssignmentUpdateRequest(BaseModel):
     title: Optional[str] = None
     description: Optional[str] = None
     due_date: Optional[str] = None
-    max_team_size: Optional[int] = None
+    ideal_team_size: Optional[int] = None
     ai_preferences: Optional[dict] = None
     sort_order: Optional[int] = None
 
@@ -889,7 +890,7 @@ def create_assignment(class_id: str, request: Request, assignment_data: Assignme
             "title": assignment_data.title,
             "description": assignment_data.description,
             "due_date": assignment_data.due_date,
-            "max_team_size": assignment_data.max_team_size,
+            "ideal_team_size": assignment_data.ideal_team_size,
             "ai_preferences": assignment_data.ai_preferences,
             "sort_order": assignment_data.sort_order,
             "created_by": educator_id,
@@ -1077,10 +1078,16 @@ def generate_assignment_teams(class_id: str, assignment_id: str, request: Reques
         assignment_goal_hint = (
             assignment_data.get("description") or assignment_data.get("title") or class_data.get("name") or ""
         ).strip()
+        ideal_team_size = assignment_data.get("ideal_team_size") or assignment_data.get("max_team_size", 3)
+        try:
+            ideal_team_size = max(2, min(10, int(ideal_team_size)))
+        except (TypeError, ValueError):
+            ideal_team_size = 3
         class_context = {
             "coursework_deadline": assignment_data.get("due_date"),
             "project_goal_hint": assignment_goal_hint,
-            "max_team_size": assignment_data.get("max_team_size", 3),
+            "ideal_team_size": ideal_team_size,
+            "student_count": len(valid_students),
         }
 
         matches = match_students(
@@ -1106,16 +1113,39 @@ def generate_assignment_teams(class_id: str, assignment_id: str, request: Reques
         created_draft_ids = save_team_drafts(
             matches,
             class_id,
-            max_team_size=class_data.get("max_team_size", 3),
+            max_team_size=ideal_team_size,
             assignment_id=assignment_id,
             db_client=admin_supabase,
         ) or []
+
+        team_size_report = None
+        groups = matches.get("groups", []) if isinstance(matches, dict) else []
+        if groups and ideal_team_size is not None:
+            team_size_entries = []
+            non_ideal_teams = []
+            for idx, group in enumerate(groups, start=1):
+                members = group.get("members", [])
+                valid_members = [m for m in members if isinstance(m, str) and len(m) == 36]
+                size = len(valid_members)
+                is_ideal = size == ideal_team_size
+                team_size_entries.append({"team_index": idx, "size": size, "is_ideal": is_ideal})
+                if not is_ideal:
+                    non_ideal_teams.append(
+                        {"team_index": idx, "size": size, "delta": size - ideal_team_size}
+                    )
+            team_size_report = {
+                "ideal_team_size": ideal_team_size,
+                "all_ideal": len(non_ideal_teams) == 0,
+                "teams": team_size_entries,
+                "non_ideal_teams": non_ideal_teams,
+            }
 
         return {
             "matches": matches,
             "class_id": class_id,
             "assignment_id": assignment_id,
             "draft_team_ids": created_draft_ids,
+            "team_size_report": team_size_report,
         }
 
     except Exception as e:

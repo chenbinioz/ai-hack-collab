@@ -7,9 +7,11 @@ import { useParams, useRouter } from "next/navigation";
 import { createStudentBrowserClient } from "@/lib/supabase/student-browser-client";
 import {
   AssignmentCard,
+  SurveyTable,
   type Assignment,
   type SurveyResponse,
 } from "@/app/educator/(workspace)/classes/assignment-card";
+import { type DraftTeam } from "./draft-teams-board";
 import { CreateAssignmentModal } from "@/app/educator/(workspace)/classes/create-assignment-modal";
 import { ClassFeedbackOverview } from "@/app/educator/(workspace)/classes/class-feedback-overview";
 import { ClassExternalDataPanel } from "@/app/educator/(workspace)/classes/class-external-data-panel";
@@ -70,10 +72,7 @@ export default function ClassManagementPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showCreateAssignmentModal, setShowCreateAssignmentModal] = useState(false);
-  const [isSavingDeadline, setIsSavingDeadline] = useState(false);
-  const [isGeneratingTeams, setIsGeneratingTeams] = useState(false);
-  const [isResettingTeams, setIsResettingTeams] = useState(false);
-  const [deadlineInput, setDeadlineInput] = useState("");
+  const [activeAssignmentId, setActiveAssignmentId] = useState<string | null>(null);
 
   const supabase = createStudentBrowserClient();
 
@@ -83,9 +82,22 @@ export default function ClassManagementPage() {
     }
   }, [classId]);
 
-  const fetchClassData = async () => {
+  useEffect(() => {
+    if (assignments.length === 0) {
+      setActiveAssignmentId(null);
+      return;
+    }
+
+    if (!activeAssignmentId || !assignments.some((assignment) => assignment.id === activeAssignmentId)) {
+      setActiveAssignmentId(assignments[0].id);
+    }
+  }, [assignments, activeAssignmentId]);
+
+  const fetchClassData = async (options?: { silent?: boolean }) => {
     try {
-      setIsLoading(true);
+      if (!options?.silent) {
+        setIsLoading(true);
+      }
       setError(null);
 
       const { data: { session } } = await supabase.auth.getSession();
@@ -262,11 +274,33 @@ export default function ClassManagementPage() {
       console.error("Error fetching class data:", err);
       setError(err.message || "Failed to load class data");
     } finally {
-      setIsLoading(false);
+      if (!options?.silent) {
+        setIsLoading(false);
+      }
     }
   };
 
   const completedResponses = surveyResponses.filter((r) => r.survey_completed);
+  const studentNames = Object.fromEntries(
+    surveyResponses.map((response) => [response.student_id, response.name]),
+  );
+  const studentsMapForDrafts = Object.fromEntries(
+    surveyResponses.map((r) => [
+      r.student_id,
+      {
+        id: r.student_id,
+        name: r.name,
+        email: r.email,
+        workload: r.survey_approach_heavy_workload,
+        coding: r.survey_confidence_coding,
+      },
+    ]),
+  );
+
+  const getDraftsForAssignment = (assignmentId: string) =>
+    drafts.filter((draft) => draft.assignment_id === assignmentId);
+
+  const activeAssignment = assignments.find((assignment) => assignment.id === activeAssignmentId) ?? null;
 
   const getTeamMemberMap = (assignmentId: string) => {
     const map = new Map<string, string>();
@@ -276,137 +310,42 @@ export default function ClassManagementPage() {
     return map;
   };
 
-  const handleSaveDeadline = async () => {
-    try {
-      setIsSavingDeadline(true);
-      setError(null);
-
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session) {
-        throw new Error("You must be signed in to update deadline.");
-      }
-
-      const response = await fetch(`/api/educator/classes/${classId}`, {
-        method: "PATCH",
-        headers: {
-          Authorization: `Bearer ${session.access_token}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          coursework_deadline: deadlineInput || null,
-        }),
-      });
-
-      const payload = await response.json();
-      if (!response.ok) {
-        throw new Error(payload.error || "Failed to update deadline");
-      }
-
-      await fetchClassData();
-    } catch (err: any) {
-      console.error("Error saving deadline:", err);
-      setError(err.message || "Failed to update deadline");
-    } finally {
-      setIsSavingDeadline(false);
-    }
+  const applyAssignmentTeams = (
+    assignmentId: string,
+    newTeams: Team[],
+    newMembers: TeamMember[],
+  ) => {
+    setTeams((prev) => [
+      ...prev.filter((team) => team.assignment_id !== assignmentId),
+      ...newTeams,
+    ]);
+    setTeamMembers((prev) => [
+      ...prev.filter((member) => member.assignment_id !== assignmentId),
+      ...newMembers,
+    ]);
   };
 
-  const getApiErrorMessage = (payload: any) => {
-    if (!payload) {
+  const getApiErrorMessage = (payload: unknown) => {
+    if (!payload || typeof payload !== "object") {
       return null;
     }
 
-    if (typeof payload.detail === "string") {
-      return payload.detail;
+    const record = payload as { detail?: unknown; error?: unknown };
+    if (typeof record.detail === "string") {
+      return record.detail;
     }
 
-    if (payload.detail && typeof payload.detail === "object") {
-      return payload.detail.error || payload.detail.redirect_endpoint || JSON.stringify(payload.detail);
+    if (record.detail && typeof record.detail === "object") {
+      const detail = record.detail as { error?: unknown; redirect_endpoint?: unknown };
+      if (typeof detail.error === "string") {
+        return detail.error;
+      }
+      if (detail.redirect_endpoint) {
+        return JSON.stringify(detail);
+      }
     }
 
-    return payload.error || null;
-  };
-
-  const handleGenerateTeams = async () => {
-    try {
-      setIsGeneratingTeams(true);
-      setError(null);
-
-      const assignmentId = assignments[0]?.id;
-      if (!assignmentId) {
-        throw new Error("No assignment available to generate teams.");
-      }
-
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session) {
-        throw new Error("You must be signed in to generate teams.");
-      }
-
-      const response = await fetch(
-        `${API_BASE_URL}/educator/classes/${classId}/assignments/${assignmentId}/generate-teams`,
-        {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${session.access_token}`,
-            "Content-Type": "application/json",
-          },
-        },
-      );
-
-      const payload = await response.json().catch(() => ({}));
-      const apiError = getApiErrorMessage(payload);
-
-      if (apiError) {
-        throw new Error(apiError);
-      }
-
-      if (!response.ok) {
-        throw new Error(apiError || "Failed to generate teams");
-      }
-
-      // Refresh data after team generation
-      await fetchClassData();
-    } catch (err: any) {
-      console.error("Error generating teams:", err);
-      setError(err.message || "Failed to generate teams");
-    } finally {
-      setIsGeneratingTeams(false);
-    }
-  };
-
-  const handleResetTeams = async () => {
-    try {
-      setIsResettingTeams(true);
-      setError(null);
-
-      // Reset teams by setting team_id to null for all students in this class
-      const { error: resetError } = await supabase
-        .from("student_profiles")
-        .update({ team_id: null })
-        .in("id", enrolledStudents.map(s => s.id));
-
-      if (resetError) {
-        throw resetError;
-      }
-
-      // Delete teams for this class
-      const { error: deleteError } = await supabase
-        .from("teams")
-        .delete()
-        .eq("class_id", classId);
-
-      if (deleteError) {
-        throw deleteError;
-      }
-
-      // Refresh data after reset
-      await fetchClassData();
-    } catch (err: any) {
-      console.error("Error resetting teams:", err);
-      setError(err.message || "Failed to reset teams");
-    } finally {
-      setIsResettingTeams(false);
-    }
+    return typeof record.error === "string" ? record.error : null;
   };
 
   const handleSwapDraft = async (studentId: string, fromDraftId: string, toDraftId: string, reason: string) => {
@@ -531,7 +470,7 @@ export default function ClassManagementPage() {
           <div>
             <h2 className="text-lg font-semibold text-foreground">Assignments</h2>
             <p className="text-sm text-muted">
-              Each assignment has its own deadline, team settings, and team generation.
+              Switch tabs to manage each assignment&apos;s teams, drafts, and progress tracker.
             </p>
           </div>
           <button
@@ -561,42 +500,9 @@ export default function ClassManagementPage() {
         <div className="mt-8">
           <ClassFeedbackOverview classId={classId} />
         </div>
-      </div>
-
-      {/* Draft Teams Section */}
-      {drafts.length > 0 && (
-        <div className="rounded-2xl border border-black/10 bg-surface p-6 shadow-sm dark:border-white/10 mt-8">
-          <DraftTeamsBoard
-            classId={classId}
-            drafts={drafts}
-            studentsMap={
-              Object.fromEntries(surveyResponses.map(r => [
-                r.student_id,
-                { id: r.student_id, name: r.name, email: r.email, workload: r.survey_approach_heavy_workload, coding: r.survey_confidence_coding }
-              ]))
-            }
-            onSwap={handleSwapDraft}
-            onPublish={handlePublishTeams}
-          />
-        </div>
-      )}
-
-      {/* Class Survey Responses */}
-      <div className="rounded-2xl border border-black/10 bg-surface p-6 shadow-sm dark:border-white/10">
-        <div className="flex items-center justify-between gap-4">
-          <div>
-            <h2 className="text-lg font-semibold text-foreground">Class survey responses</h2>
-            <p className="mt-2 text-sm text-muted">
-              Student profile survey answers for the current class only.
-            </p>
-          </div>
-          <p className="text-sm text-muted">
-            {completedResponses.length} of {surveyResponses.length} completed
-          </p>
-        </div>
 
         {assignments.length === 0 ? (
-          <div className="rounded-2xl border border-dashed border-black/15 bg-black/[0.02] p-8 text-center dark:border-white/20 dark:bg-white/[0.03]">
+          <div className="mt-6 rounded-2xl border border-dashed border-black/15 bg-black/[0.02] p-8 text-center dark:border-white/20 dark:bg-white/[0.03]">
             <p className="text-sm text-muted">No assignments yet. Add one to set deadlines and generate teams.</p>
             <button
               onClick={() => setShowCreateAssignmentModal(true)}
@@ -606,19 +512,49 @@ export default function ClassManagementPage() {
             </button>
           </div>
         ) : (
-          <div className="space-y-6">
-            {assignments.map((assignment) => (
-              <AssignmentCard
-                key={assignment.id}
-                assignment={assignment}
-                classId={classId}
-                teams={teams.filter((team) => team.assignment_id === assignment.id)}
-                teamMemberMap={getTeamMemberMap(assignment.id)}
-                surveyResponses={surveyResponses}
-                enrolledStudentCount={enrolledStudents.length}
-                onRefresh={fetchClassData}
-              />
-            ))}
+          <div className="mt-6">
+            <div className="border-b border-black/10 dark:border-white/10">
+              <nav className="-mb-px flex gap-2 overflow-x-auto pb-px" aria-label="Assignments">
+                {assignments.map((assignment) => {
+                  const isActive = assignment.id === activeAssignmentId;
+                  return (
+                    <button
+                      key={assignment.id}
+                      type="button"
+                      onClick={() => setActiveAssignmentId(assignment.id)}
+                      className={`shrink-0 rounded-t-xl border px-4 py-2.5 text-sm font-medium transition-colors ${
+                        isActive
+                          ? "border-black/10 border-b-transparent bg-surface text-brand dark:border-white/10"
+                          : "border-transparent text-muted hover:border-black/10 hover:bg-black/[0.02] hover:text-foreground dark:hover:border-white/10 dark:hover:bg-white/[0.03]"
+                      }`}
+                    >
+                      {assignment.title}
+                    </button>
+                  );
+                })}
+              </nav>
+            </div>
+
+            {activeAssignment ? (
+              <div className="pt-6">
+                <AssignmentCard
+                  key={activeAssignment.id}
+                  assignment={activeAssignment}
+                  classId={classId}
+                  teams={teams}
+                  teamMemberMap={getTeamMemberMap(activeAssignment.id)}
+                  studentNames={studentNames}
+                  enrolledStudentCount={enrolledStudents.length}
+                  drafts={getDraftsForAssignment(activeAssignment.id)}
+                  studentsMap={studentsMapForDrafts}
+                  expectedDraftMemberCount={completedResponses.length}
+                  onSwapDraft={handleSwapDraft}
+                  onPublishDraftTeams={handlePublishTeams}
+                  onRefresh={fetchClassData}
+                  onTeamsUpdated={applyAssignmentTeams}
+                />
+              </div>
+            ) : null}
           </div>
         )}
       </div>
@@ -684,6 +620,30 @@ export default function ClassManagementPage() {
                 </div>
               </div>
             ))}
+          </div>
+        )}
+      </div>
+
+      <div className="rounded-2xl border border-black/10 bg-surface p-6 shadow-sm dark:border-white/10">
+        <div className="flex items-center justify-between gap-4">
+          <div>
+            <h2 className="text-lg font-semibold text-foreground">Class survey responses</h2>
+            <p className="mt-2 text-sm text-muted">
+              Profile survey answers for all enrolled students in this class (not tied to assignment teams).
+            </p>
+          </div>
+          <p className="text-sm text-muted">
+            {completedResponses.length} of {surveyResponses.length} completed
+          </p>
+        </div>
+
+        {completedResponses.length === 0 ? (
+          <div className="mt-4 rounded-2xl border border-dashed border-black/15 bg-black/[0.02] p-6 text-center dark:border-white/20 dark:bg-white/[0.03]">
+            <p className="text-sm text-muted">No completed surveys yet for this class.</p>
+          </div>
+        ) : (
+          <div className="mt-4 overflow-hidden rounded-2xl border border-black/6 bg-white shadow-sm dark:border-white/10 dark:bg-zinc-950">
+            <SurveyTable responses={completedResponses} />
           </div>
         )}
       </div>

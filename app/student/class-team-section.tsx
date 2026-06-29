@@ -1,15 +1,15 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { TeamHub } from "@/components/team-hub";
 import { PostProjectSkillUpdateForm } from "./post-project-skill-update-form";
-
-interface ClassInfo {
-  id: string;
-  name: string;
-  description: string;
-  code: string;
-}
+import {
+  getAssignmentTabLabel,
+  isDueDatePassed,
+  pickDefaultAssignmentId,
+  type StudentClassGroup,
+} from "@/lib/student-class-groups";
 
 interface Assignment {
   id: string;
@@ -17,13 +17,12 @@ interface Assignment {
   title: string;
   description: string | null;
   due_date: string | null;
-  max_team_size: number;
+  ideal_team_size: number;
   team_id: string | null;
 }
 
 interface ClassTeamSectionProps {
-  classId: string;
-  classInfo?: ClassInfo | null;
+  classGroup: StudentClassGroup;
 }
 
 function formatCountdown(dueDate: string | null | undefined): string {
@@ -44,18 +43,14 @@ function formatCountdown(dueDate: string | null | undefined): string {
   return `${days}d ${hours}h ${minutes}m ${seconds}s remaining`;
 }
 
-function isDueDatePassed(dueDate: string | null | undefined): boolean {
-  if (!dueDate) return false;
-  const target = new Date(dueDate).getTime();
-  return !Number.isNaN(target) && target - Date.now() <= 0;
-}
-
 function AssignmentSection({
   assignment,
   classId,
+  className,
 }: {
   assignment: Assignment;
   classId: string;
+  className?: string;
 }) {
   const [countdownText, setCountdownText] = useState(formatCountdown(assignment.due_date));
   const [dueDatePassed, setDueDatePassed] = useState(isDueDatePassed(assignment.due_date));
@@ -105,11 +100,19 @@ function AssignmentSection({
     return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
   };
 
+  const showAssignmentTitle =
+    !className ||
+    assignment.title.trim().toLowerCase() !== className.trim().toLowerCase();
+
   return (
     <div className="rounded-2xl border border-black/10 bg-surface p-6 shadow-sm dark:border-white/10">
-      <h3 className="text-lg font-semibold text-foreground">{assignment.title}</h3>
+      {showAssignmentTitle ? (
+        <h3 className="text-lg font-semibold text-foreground">{assignment.title}</h3>
+      ) : null}
       {assignment.description ? (
-        <p className="mt-1 text-sm text-muted">{assignment.description}</p>
+        <p className={`text-sm text-muted ${showAssignmentTitle ? "mt-1" : ""}`}>
+          {assignment.description}
+        </p>
       ) : null}
 
       {!attachmentsLoading && attachments.length > 0 && (
@@ -142,7 +145,7 @@ function AssignmentSection({
       )}
 
       <div className="mt-2 flex items-center gap-4 text-xs text-muted">
-        <span>Max Team Size: {assignment.max_team_size}</span>
+        <span>Ideal team size: {assignment.ideal_team_size}</span>
       </div>
       <div className="mt-3 rounded-xl border border-black/10 bg-background px-3 py-2 text-sm dark:border-white/15">
         <p className="text-xs uppercase tracking-wide text-muted">Due date</p>
@@ -165,57 +168,83 @@ function AssignmentSection({
   );
 }
 
-export function ClassTeamSection({ classId, classInfo: initialClassInfo = null }: ClassTeamSectionProps) {
+export function ClassTeamSection({ classGroup }: ClassTeamSectionProps) {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const classIds = classGroup.classes.map((cls) => cls.id);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [classInfo, setClassInfo] = useState<ClassInfo | null>(initialClassInfo);
   const [assignments, setAssignments] = useState<Assignment[]>([]);
-
-  useEffect(() => {
-    setClassInfo(initialClassInfo);
-  }, [initialClassInfo]);
+  const [activeAssignmentId, setActiveAssignmentId] = useState<string | null>(null);
 
   useEffect(() => {
     void fetchClassTeamData();
-  }, [classId]);
+  }, [classGroup.id]);
+
+  useEffect(() => {
+    if (assignments.length === 0) {
+      setActiveAssignmentId(null);
+      return;
+    }
+
+    const assignmentFromUrl = searchParams.get("assignment");
+    setActiveAssignmentId(
+      pickDefaultAssignmentId(assignments, assignmentFromUrl),
+    );
+  }, [assignments, searchParams]);
+
+  function handleAssignmentChange(assignmentId: string) {
+    setActiveAssignmentId(assignmentId);
+    const params = new URLSearchParams(searchParams);
+    params.set("tab", classGroup.id);
+    params.set("assignment", assignmentId);
+    router.replace(`/student?${params.toString()}`, { scroll: false });
+  }
+
+  const activeAssignment = assignments.find((assignment) => assignment.id === activeAssignmentId) ?? null;
 
   const fetchClassTeamData = async () => {
     try {
       setIsLoading(true);
       setError(null);
 
-      if (!initialClassInfo || initialClassInfo.id !== classId) {
-        const classResponse = await fetch("/api/student/classes", {
-          method: "GET",
-          headers: { "Content-Type": "application/json" },
+      const assignmentResponses = await Promise.all(
+        classIds.map(async (classId) => {
+          const response = await fetch(`/api/student/classes/${classId}/assignments`, {
+            method: "GET",
+            headers: { "Content-Type": "application/json" },
+          });
+          const payload = await response.json();
+
+          if (!response.ok) {
+            throw new Error(payload.error || "Failed to fetch assignments");
+          }
+
+          return (payload.assignments || []) as Assignment[];
+        }),
+      );
+
+      const mergedAssignments = assignmentResponses
+        .flat()
+        .filter(
+          (assignment, index, allAssignments) =>
+            allAssignments.findIndex((item) => item.id === assignment.id) === index,
+        )
+        .sort((a, b) => {
+          const aPassed = isDueDatePassed(a.due_date);
+          const bPassed = isDueDatePassed(b.due_date);
+          if (aPassed !== bPassed) {
+            return aPassed ? 1 : -1;
+          }
+
+          if (a.due_date && b.due_date) {
+            return new Date(b.due_date).getTime() - new Date(a.due_date).getTime();
+          }
+
+          return 0;
         });
 
-        const classPayload = await classResponse.json();
-
-        if (!classResponse.ok) {
-          throw new Error(classPayload.error || "Class not found");
-        }
-
-        const currentClass = (classPayload.classes || []).find((c: ClassInfo) => c.id === classId);
-        if (!currentClass) {
-          throw new Error("Class not found");
-        }
-
-        setClassInfo(currentClass);
-      }
-
-      const assignmentsResponse = await fetch(`/api/student/classes/${classId}/assignments`, {
-        method: "GET",
-        headers: { "Content-Type": "application/json" },
-      });
-
-      const assignmentsPayload = await assignmentsResponse.json();
-
-      if (!assignmentsResponse.ok) {
-        throw new Error(assignmentsPayload.error || "Failed to fetch assignments");
-      }
-
-      setAssignments(assignmentsPayload.assignments || []);
+      setAssignments(mergedAssignments);
     } catch (err: unknown) {
       console.error("Error fetching class team data:", err);
       const message = err instanceof Error ? err.message : "Failed to load team information";
@@ -271,13 +300,15 @@ export function ClassTeamSection({ classId, classInfo: initialClassInfo = null }
   return (
     <section className="space-y-6">
       <div className="rounded-2xl border border-black/10 bg-surface p-6 shadow-sm dark:border-white/10">
-        <h2 className="text-xl font-semibold text-foreground">{classInfo?.name}</h2>
-        <p className="mt-1 text-sm text-muted">{classInfo?.description}</p>
-        <div className="mt-2 flex items-center gap-4 text-xs text-muted">
-          <span>
-            Class Code:{" "}
-            <code className="rounded bg-black/5 px-1 py-0.5 dark:bg-white/10">{classInfo?.code}</code>
-          </span>
+        <h2 className="text-xl font-semibold text-foreground">{classGroup.name}</h2>
+        <p className="mt-1 text-sm text-muted">{classGroup.description}</p>
+        <div className="mt-2 flex flex-wrap items-center gap-4 text-xs text-muted">
+          {classGroup.classes.map((cls) => (
+            <span key={cls.id}>
+              Class Code:{" "}
+              <code className="rounded bg-black/5 px-1 py-0.5 dark:bg-white/10">{cls.code}</code>
+            </span>
+          ))}
         </div>
       </div>
 
@@ -289,9 +320,42 @@ export function ClassTeamSection({ classId, classInfo: initialClassInfo = null }
           </p>
         </div>
       ) : (
-        assignments.map((assignment) => (
-          <AssignmentSection key={assignment.id} assignment={assignment} classId={classId} />
-        ))
+        <div>
+          {assignments.length > 1 && (
+            <div className="border-b border-black/10 dark:border-white/10">
+              <nav className="-mb-px flex gap-2 overflow-x-auto pb-px" aria-label="Assignments">
+                {assignments.map((assignment) => {
+                  const isActive = assignment.id === activeAssignmentId;
+                  return (
+                    <button
+                      key={assignment.id}
+                      type="button"
+                      onClick={() => handleAssignmentChange(assignment.id)}
+                      className={`shrink-0 rounded-t-xl border px-4 py-2.5 text-sm font-medium transition-colors ${
+                        isActive
+                          ? "border-black/10 border-b-transparent bg-surface text-brand dark:border-white/10"
+                          : "border-transparent text-muted hover:border-black/10 hover:bg-black/[0.02] hover:text-foreground dark:hover:border-white/10 dark:hover:bg-white/[0.03]"
+                      }`}
+                    >
+                      {getAssignmentTabLabel(assignment, assignments, classGroup.name)}
+                    </button>
+                  );
+                })}
+              </nav>
+            </div>
+          )}
+
+          {activeAssignment ? (
+            <div className={assignments.length > 1 ? "pt-6" : undefined}>
+              <AssignmentSection
+                key={activeAssignment.id}
+                assignment={activeAssignment}
+                classId={activeAssignment.class_id}
+                className={classGroup.name}
+              />
+            </div>
+          ) : null}
+        </div>
       )}
     </section>
   );

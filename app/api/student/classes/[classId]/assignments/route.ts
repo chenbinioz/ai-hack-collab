@@ -29,7 +29,7 @@ export async function GET(
       title: string;
       description: string | null;
       due_date: string | null;
-      max_team_size: number;
+      ideal_team_size: number;
       ai_preferences: unknown;
       sort_order: number;
       team_id: string | null;
@@ -39,7 +39,7 @@ export async function GET(
       title: row.title,
       description: row.description,
       due_date: row.due_date,
-      max_team_size: row.max_team_size,
+      ideal_team_size: row.ideal_team_size,
       ai_preferences: row.ai_preferences,
       sort_order: row.sort_order,
       team_id: row.team_id,

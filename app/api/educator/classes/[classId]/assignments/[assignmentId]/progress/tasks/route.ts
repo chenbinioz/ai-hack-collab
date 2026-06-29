@@ -77,14 +77,17 @@ export async function POST(
       return NextResponse.json({ error: maxError.message }, { status: 500 });
     }
 
+    const taskInsert = {
+      assignment_id: assignmentId,
+      // Legacy column on some deployments — mirrors assignment_id (see existing rows).
+      assignment_progress_id: assignmentId,
+      title,
+      sort_order: (maxRow?.sort_order ?? -1) + 1,
+    };
+
     const { data: task, error: insertError } = await supabase
       .from("assignment_progress_tasks")
-      .insert({
-        assignment_id: assignmentId,
-        assignment_progress_id: assignmentId,
-        title,
-        sort_order: (maxRow?.sort_order ?? -1) + 1,
-      })
+      .insert(taskInsert)
       .select("id, title, sort_order, created_at")
       .single();
 

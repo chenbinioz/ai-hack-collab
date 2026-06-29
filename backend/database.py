@@ -39,7 +39,7 @@ def get_all_students():
         print(f"Supabase Select Error: {e}")
         return []
 
-def save_teams(matches_parsed, class_id=None, max_team_size=None, assignment_id=None):
+def save_teams(matches_parsed, class_id=None, ideal_team_size=None, assignment_id=None):
     """
     Takes parsed JSON containing groups, inserts a new 'teams' record,
     and assigns members via team_members (when assignment_id is set) or
@@ -48,22 +48,25 @@ def save_teams(matches_parsed, class_id=None, max_team_size=None, assignment_id=
     Args:
         matches_parsed: Parsed JSON from AI matcher with groups
         class_id: Optional class ID to scope teams
-        max_team_size: Optional max team size constraint for validation
+        ideal_team_size: Optional ideal team size for validation reporting
         assignment_id: Optional assignment ID for per-assignment team membership
+
+    Returns:
+        Dict with created_team_ids and optional team_size_report.
     """
     if not supabase:
         print("Error: Supabase client is not initialized.")
-        return
+        return {"created_team_ids": [], "team_size_report": None}
 
     groups = matches_parsed.get("groups", [])
     factor_weights = matches_parsed.get("factor_weights", {})
     if not groups:
-        return
+        return {"created_team_ids": [], "team_size_report": None}
         
     print(f"Starting to sync {len(groups)} AI-generated teams to Supabase...")
     
-    # Track violations for warning
-    violations = []
+    team_size_entries = []
+    non_ideal_teams = []
     
     created_team_ids = []
 
@@ -80,15 +83,23 @@ def save_teams(matches_parsed, class_id=None, max_team_size=None, assignment_id=
             print(f"Skipping Team {idx}: No valid member UUIDs found.")
             continue
         
-        # Check for max team size violation
-        if max_team_size and len(valid_members) > max_team_size:
-            violations.append({
+        team_size = len(valid_members)
+        is_ideal = ideal_team_size is None or team_size == ideal_team_size
+        team_size_entries.append({
+            "team_index": idx,
+            "size": team_size,
+            "is_ideal": is_ideal,
+        })
+        if ideal_team_size is not None and not is_ideal:
+            non_ideal_teams.append({
                 "team_index": idx,
-                "size": len(valid_members),
-                "max_allowed": max_team_size,
-                "members": valid_members
+                "size": team_size,
+                "delta": team_size - ideal_team_size,
             })
-            print(f"⚠️  Team {idx} violates max size: {len(valid_members)} members > {max_team_size} max (STILL CREATING - consider regenerating)")
+            print(
+                f"⚠️  Team {idx} is not ideal size: {team_size} members "
+                f"(ideal: {ideal_team_size}) — still creating team"
+            )
 
         team_insert = {
             "name": f"Team {idx}",
@@ -159,15 +170,31 @@ def save_teams(matches_parsed, class_id=None, max_team_size=None, assignment_id=
         except Exception as e:
             print(f"Supabase Error processing Team {idx}: {e}")
     
-    # Report any violations
-    if violations:
-        print(f"\n⚠️  TEAM SIZE VIOLATIONS DETECTED ({len(violations)} teams):")
-        for v in violations:
-            print(f"  - Team {v['team_index']}: {v['size']} members (max: {v['max_allowed']})")
-        print("  → Consider regenerating teams with the constraint properly applied\n")
+    # Report any non-ideal team sizes
+    team_size_report = None
+    if ideal_team_size is not None and team_size_entries:
+        team_size_report = {
+            "ideal_team_size": ideal_team_size,
+            "all_ideal": len(non_ideal_teams) == 0,
+            "teams": team_size_entries,
+            "non_ideal_teams": non_ideal_teams,
+        }
+        if non_ideal_teams:
+            print(f"\n⚠️  NON-IDEAL TEAM SIZES DETECTED ({len(non_ideal_teams)} teams):")
+            for entry in non_ideal_teams:
+                print(
+                    f"  - Team {entry['team_index']}: {entry['size']} members "
+                    f"(ideal: {ideal_team_size}, delta: {entry['delta']:+d})"
+                )
+            print("  → Consider regenerating teams with the ideal size properly applied\n")
+        else:
+            print(f"\n✓ All {len(team_size_entries)} teams match ideal size ({ideal_team_size})\n")
     
     print("AI Team sync complete.")
-    return created_team_ids
+    return {
+        "created_team_ids": created_team_ids,
+        "team_size_report": team_size_report,
+    }
 
 def save_team_drafts(matches_parsed, class_id=None, max_team_size=None, assignment_id=None, db_client=None):
     db = db_client or supabase
@@ -181,8 +208,9 @@ def save_team_drafts(matches_parsed, class_id=None, max_team_size=None, assignme
         return []
         
     created_team_ids = []
+    team_number = 0
     
-    for idx, group in enumerate(groups, start=1):
+    for group in groups:
         reason = group.get("reason", "")
         members = group.get("members", [])
         match_trace = group.get("match_trace", [])
@@ -192,9 +220,11 @@ def save_team_drafts(matches_parsed, class_id=None, max_team_size=None, assignme
         valid_members = [m for m in members if isinstance(m, str) and len(m) == 36]
         if not valid_members:
             continue
+
+        team_number += 1
             
         team_insert = {
-            "name": f"Team {idx}",
+            "name": f"Team {team_number}",
             "reason": reason,
             "match_explanation": {
                 "factor_weights": factor_weights,
@@ -207,6 +237,7 @@ def save_team_drafts(matches_parsed, class_id=None, max_team_size=None, assignme
         if group_assignment_id:
             team_insert["assignment_id"] = group_assignment_id
             
+        team_id = None
         try:
             team_res = db.table("team_drafts").insert(team_insert).execute()
             if not team_res.data:
@@ -219,7 +250,13 @@ def save_team_drafts(matches_parsed, class_id=None, max_team_size=None, assignme
             db.table("team_draft_members").insert(member_inserts).execute()
             
         except Exception as e:
-            print(f"Supabase Error processing draft Team {idx}: {e}")
+            print(f"Supabase Error processing draft Team {team_number}: {e}")
+            if team_id:
+                try:
+                    db.table("team_drafts").delete().eq("id", team_id).execute()
+                    created_team_ids = [draft_id for draft_id in created_team_ids if draft_id != team_id]
+                except Exception as cleanup_err:
+                    print(f"Warning: Failed to roll back draft team {team_id}: {cleanup_err}")
             
     return created_team_ids
 
