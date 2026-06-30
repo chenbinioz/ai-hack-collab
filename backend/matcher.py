@@ -496,6 +496,63 @@ def _chunk_students_for_ideal_size(student_ids, ideal_team_size):
     return teams
 
 
+def _valid_member_id(student_id):
+    return isinstance(student_id, str) and len(student_id) == 36
+
+
+def _source_group_for_members(members, original_groups):
+    """Pick the pre-rebalance AI group with the largest member overlap."""
+    member_set = {member for member in members if _valid_member_id(member)}
+    if not member_set:
+        return None
+
+    best_group = None
+    best_overlap = 0
+    for group in original_groups:
+        if not isinstance(group, dict):
+            continue
+        group_members = {
+            member for member in group.get("members", []) if _valid_member_id(member)
+        }
+        overlap = len(member_set & group_members)
+        if overlap > best_overlap:
+            best_overlap = overlap
+            best_group = group
+
+    return best_group if best_overlap > 0 else None
+
+
+def _rebalanced_group_payload(
+    chunk,
+    chunk_index,
+    original_groups,
+    *,
+    template_reason,
+    group_reasons,
+    factor_weights,
+):
+    """Preserve per-team explainability when re-chunking to the ideal team size."""
+    source = _source_group_for_members(chunk, original_groups)
+    reason = (
+        (source.get("reason") if source else None)
+        or (group_reasons[chunk_index] if chunk_index < len(group_reasons) else None)
+        or template_reason
+    )
+
+    trace = None
+    if source and isinstance(source.get("match_trace"), list) and source.get("match_trace"):
+        trace = [dict(entry) for entry in source["match_trace"] if isinstance(entry, dict)]
+
+    if not trace:
+        trace = _fallback_trace(reason, factor_weights or {})
+
+    return {
+        "members": chunk,
+        "reason": reason,
+        "match_trace": trace,
+    }
+
+
 def _enforce_ideal_team_sizes(matches, ideal_team_size, all_student_ids=None):
     """Rebalance AI groups so every known student is assigned once at the ideal team size."""
     if not isinstance(matches, dict) or not ideal_team_size or ideal_team_size < 2:
@@ -505,18 +562,16 @@ def _enforce_ideal_team_sizes(matches, ideal_team_size, all_student_ids=None):
     if not isinstance(groups, list) or not groups:
         return matches
 
-    def _valid_id(student_id):
-        return isinstance(student_id, str) and len(student_id) == 36
+    factor_weights = matches.get("factor_weights", {})
 
     known_ids = [
         student_id
         for student_id in (all_student_ids or [])
-        if _valid_id(student_id)
+        if _valid_member_id(student_id)
     ]
     known_set = set(known_ids)
 
     template_reason = "Grouped to match the configured ideal team size."
-    template_trace = []
     group_reasons = []
 
     for group in groups:
@@ -526,8 +581,6 @@ def _enforce_ideal_team_sizes(matches, ideal_team_size, all_student_ids=None):
             group_reasons.append(group["reason"])
             if template_reason == "Grouped to match the configured ideal team size.":
                 template_reason = group["reason"]
-        if group.get("match_trace") and not template_trace:
-            template_trace = group["match_trace"]
 
     if known_ids:
         ai_ordered = []
@@ -545,7 +598,7 @@ def _enforce_ideal_team_sizes(matches, ideal_team_size, all_student_ids=None):
             if not isinstance(group, dict):
                 continue
             for member in group.get("members", []):
-                if _valid_id(member) and member not in all_members:
+                if _valid_member_id(member) and member not in all_members:
                     all_members.append(member)
 
     if not all_members:
@@ -554,17 +607,20 @@ def _enforce_ideal_team_sizes(matches, ideal_team_size, all_student_ids=None):
     if known_ids:
         chunks = _chunk_students_for_ideal_size(all_members, ideal_team_size)
         matches["groups"] = [
-            {
-                "members": chunk,
-                "reason": group_reasons[i] if i < len(group_reasons) else template_reason,
-                "match_trace": template_trace,
-            }
-            for i, chunk in enumerate(chunks)
+            _rebalanced_group_payload(
+                chunk,
+                index,
+                groups,
+                template_reason=template_reason,
+                group_reasons=group_reasons,
+                factor_weights=factor_weights,
+            )
+            for index, chunk in enumerate(chunks)
         ]
         return matches
 
     current_sizes = [
-        len([member for member in group.get("members", []) if _valid_id(member)])
+        len([member for member in group.get("members", []) if _valid_member_id(member)])
         for group in groups
         if isinstance(group, dict)
     ]
@@ -577,12 +633,15 @@ def _enforce_ideal_team_sizes(matches, ideal_team_size, all_student_ids=None):
 
     chunks = _chunk_students_for_ideal_size(all_members, ideal_team_size)
     matches["groups"] = [
-        {
-            "members": chunk,
-            "reason": group_reasons[i] if i < len(group_reasons) else template_reason,
-            "match_trace": template_trace,
-        }
-        for i, chunk in enumerate(chunks)
+        _rebalanced_group_payload(
+            chunk,
+            index,
+            groups,
+            template_reason=template_reason,
+            group_reasons=group_reasons,
+            factor_weights=factor_weights,
+        )
+        for index, chunk in enumerate(chunks)
     ]
     return matches
 
