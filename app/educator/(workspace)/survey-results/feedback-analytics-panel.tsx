@@ -1,7 +1,9 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { createStudentBrowserClient } from "@/lib/supabase/student-browser-client";
+import { getPublicBackendUrl } from "@/lib/api/public-backend-url";
+import { withTimeout } from "@/lib/async/with-timeout";
+import { useStudentBrowserClient } from "@/lib/supabase/use-student-browser-client";
 
 interface TeamFeedbackAverage {
   team_id: string;
@@ -20,6 +22,7 @@ interface FeedbackAnalyticsPanelProps {
 }
 
 export function FeedbackAnalyticsPanel({ classId, assignmentId }: FeedbackAnalyticsPanelProps) {
+  const supabase = useStudentBrowserClient();
   const [averages, setAverages] = useState<TeamFeedbackAverage[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -34,14 +37,10 @@ export function FeedbackAnalyticsPanel({ classId, assignmentId }: FeedbackAnalyt
       setLoadError(null);
 
       try {
-        const supabase = createStudentBrowserClient();
-        // Bound the data fetch with a timeout to avoid leaving the UI stuck
         let teamsQuery = supabase.from("teams").select("id, name").eq("class_id", classId);
         if (assignmentId) {
           teamsQuery = teamsQuery.eq("assignment_id", assignmentId);
         }
-        const teamsRes = await teamsQuery;
-        const teamIds = teamsRes.data?.map((t: any) => t.id) || [];
 
         let feedbackQuery = supabase
           .from("feedback")
@@ -51,30 +50,44 @@ export function FeedbackAnalyticsPanel({ classId, assignmentId }: FeedbackAnalyt
           feedbackQuery = feedbackQuery.eq("assignment_id", assignmentId);
         }
 
-        const fetchPromise = Promise.all([
-          feedbackQuery,
-          teamsRes,
-          // message_read_times stores seconds spent reading coach messages (one row per student/message)
-          supabase.from("message_read_times").select("team_id, seconds").in("team_id", teamIds),
-        ]);
+        const teamsRes = await withTimeout(teamsQuery, 10_000, "Loading teams");
+        if (teamsRes.error) {
+          throw new Error(teamsRes.error.message);
+        }
 
-        const timeout = new Promise((_, reject) => setTimeout(() => reject(new Error("Timeout fetching analytics (10s)")), 10000));
+        const teamData = teamsRes.data ?? [];
+        const teamIds = teamData.map((team) => team.id);
 
-        const res: any = await Promise.race([fetchPromise, timeout]);
-        const [{ data: feedbackData, error: feedbackError }, { data: teamData, error: teamError }, { data: messageReadData, error: messageReadError }] = res;
+        const messageReadQuery =
+          teamIds.length > 0
+            ? supabase.from("message_read_times").select("team_id, seconds").in("team_id", teamIds)
+            : Promise.resolve({ data: [] as { team_id: string; seconds: number }[], error: null });
+
+        const [feedbackRes, messageReadRes] = await withTimeout(
+          Promise.all([feedbackQuery, messageReadQuery]),
+          10_000,
+          "Loading feedback analytics",
+        );
+
+        const { data: feedbackData, error: feedbackError } = feedbackRes;
+        const { data: messageReadData, error: messageReadError } = messageReadRes;
 
         if (feedbackError) {
           throw new Error(feedbackError.message);
         }
-        if (teamError) {
-          throw new Error(teamError.message);
+        if (messageReadError) {
+          throw new Error(messageReadError.message);
         }
 
-        const teamMap = new Map(teamData?.map((team: any) => [team.id, team.name]));
+        const teamMap = new Map(teamData.map((team) => [team.id, team.name]));
         // Fetch collaboration balances from backend educator-data
         try {
-          const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
-          const res = await fetch(`${apiUrl}/educator-data`);
+          const apiUrl = getPublicBackendUrl();
+          const res = await withTimeout(
+            fetch(`${apiUrl}/educator-data`),
+            10_000,
+            "Loading collaboration balances",
+          );
           if (res.ok) {
             const json = await res.json();
             const teamsFromApi = json.teams || [];
@@ -175,7 +188,7 @@ export function FeedbackAnalyticsPanel({ classId, assignmentId }: FeedbackAnalyt
     return () => {
       isMounted = false;
     };
-  }, [classId, assignmentId]);
+  }, [classId, assignmentId, supabase]);
 
   if (isLoading) {
     return (

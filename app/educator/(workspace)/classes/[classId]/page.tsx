@@ -1,6 +1,6 @@
 "use client";
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+import { getPublicBackendUrl } from "@/lib/api/public-backend-url";
 
 import { useState, useEffect } from "react";
 import { useParams, useRouter } from "next/navigation";
@@ -247,7 +247,7 @@ export default function ClassManagementPage() {
       try {
         const draftController = new AbortController();
         const draftTimeout = setTimeout(() => draftController.abort(), 5000);
-        const draftsResponse = await fetch(`${API_BASE_URL}/educator/classes/${classId}/draft-teams`, {
+        const draftsResponse = await fetch(`${getPublicBackendUrl()}/educator/classes/${classId}/draft-teams`, {
           headers: {
             Authorization: `Bearer ${session.access_token}`,
           },
@@ -346,7 +346,7 @@ export default function ClassManagementPage() {
   const handleSwapDraft = async (studentId: string, fromDraftId: string, toDraftId: string, reason: string) => {
     const { data: { session } } = await supabase.auth.getSession();
     if (!session) return;
-    const response = await fetch(`${API_BASE_URL}/educator/classes/${classId}/draft-teams/swap`, {
+    const response = await fetch(`${getPublicBackendUrl()}/educator/classes/${classId}/draft-teams/swap`, {
       method: "POST",
       headers: {
         Authorization: `Bearer ${session.access_token}`,
@@ -368,7 +368,7 @@ export default function ClassManagementPage() {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) throw new Error("Not authenticated");
 
-      const response = await fetch(`${API_BASE_URL}/educator/classes/${classId}/publish-teams`, {
+      const response = await fetch(`${getPublicBackendUrl()}/educator/classes/${classId}/publish-teams`, {
         method: "POST",
         headers: {
           Authorization: `Bearer ${session.access_token}`,

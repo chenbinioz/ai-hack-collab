@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getBackendUrl } from "@/lib/api/backend-url";
 
+// Fallback proxy when the browser cannot reach Render directly.
+export const maxDuration = 300;
+
 export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ classId: string; assignmentId: string }> },

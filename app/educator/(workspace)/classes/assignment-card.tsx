@@ -1,7 +1,8 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { createStudentBrowserClient } from "@/lib/supabase/student-browser-client";
+import { getPublicBackendUrl } from "@/lib/api/public-backend-url";
+import { useStudentBrowserClient } from "@/lib/supabase/use-student-browser-client";
 import { FeedbackAnalyticsPanel } from "@/app/educator/(workspace)/survey-results/feedback-analytics-panel";
 import { buildTeamSizeReport, countMembersPerTeam } from "@/lib/teams/ideal-size";
 import { MatchingFocusPreferencesPicker } from "@/components/matching-focus-preferences-picker";
@@ -233,7 +234,7 @@ export function AssignmentCard({
   onRefresh,
   onTeamsUpdated,
 }: AssignmentCardProps) {
-  const supabase = createStudentBrowserClient();
+  const supabase = useStudentBrowserClient();
 
   const [dueDateInput, setDueDateInput] = useState(
     assignment.due_date ? new Date(assignment.due_date).toISOString().slice(0, 16) : "",
@@ -362,7 +363,7 @@ export function AssignmentCard({
         ai_preferences: aiPreferences,
       });
 
-      const targetUrl = `/api/educator/classes/${classId}/assignments/${assignment.id}/generate-teams`;
+      const targetUrl = `${getPublicBackendUrl()}/educator/classes/${classId}/assignments/${assignment.id}/generate-teams`;
 
       const response = await fetch(targetUrl, {
         method: "POST",
@@ -370,6 +371,8 @@ export function AssignmentCard({
           Authorization: `Bearer ${session.access_token}`,
           "Content-Type": "application/json",
         },
+        // Team generation can take several minutes (Gemini + large classes).
+        signal: AbortSignal.timeout(5 * 60 * 1000),
       });
 
       const payload = await response.json().catch(() => ({}));
