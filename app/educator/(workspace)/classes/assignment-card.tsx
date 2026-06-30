@@ -376,6 +376,7 @@ export function AssignmentCard({
       });
 
       const payload = await response.json().catch(() => ({}));
+      const draftTeamIds = Array.isArray(payload?.draft_team_ids) ? payload.draft_team_ids : [];
 
       if (!response.ok) {
         throw new Error(formatGenerateTeamsError(payload, "Failed to generate teams"));
@@ -402,6 +403,10 @@ export function AssignmentCard({
           .join(", ");
         setGenerationSizeReport(
           `${report.non_ideal_teams.length} team${report.non_ideal_teams.length === 1 ? "" : "s"} are not the ideal size (${ideal}): ${details}.`,
+        );
+      } else if (draftTeamIds.length > 0) {
+        setGenerationSizeReport(
+          `Generated ${draftTeamIds.length} draft team${draftTeamIds.length === 1 ? "" : "s"}. Review the draft board below and publish when ready.`,
         );
       } else {
         setGenerationSizeReport(null);

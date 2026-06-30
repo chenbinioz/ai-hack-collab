@@ -246,7 +246,7 @@ export default function ClassManagementPage() {
       // Fetch draft teams for this class (best-effort: don't block page if backend is down)
       try {
         const draftController = new AbortController();
-        const draftTimeout = setTimeout(() => draftController.abort(), 5000);
+        const draftTimeout = setTimeout(() => draftController.abort(), 30_000);
         const draftsResponse = await fetch(`${getPublicBackendUrl()}/educator/classes/${classId}/draft-teams`, {
           headers: {
             Authorization: `Bearer ${session.access_token}`,
