@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
-import { createStudentBrowserClient } from "@/lib/supabase/student-browser-client";
+import { useStudentBrowserClient } from "@/lib/supabase/use-student-browser-client";
 
 interface TrackerTask {
   id: string;
@@ -59,7 +59,7 @@ export function AssignmentProgressTracker({
   teams = [],
   className = "",
 }: AssignmentProgressTrackerProps) {
-  const supabase = createStudentBrowserClient();
+  const supabase = useStudentBrowserClient();
   const [tasks, setTasks] = useState<TrackerTask[]>([]);
   const [progressItems, setProgressItems] = useState<TrackerProgressItem[]>([]);
   const [newTaskTitle, setNewTaskTitle] = useState("");
@@ -197,12 +197,23 @@ export function AssignmentProgressTracker({
         throw new Error("Missing class id for progress tracker.");
       }
 
+      const {
+        data: { session },
+        error: sessionError,
+      } = await supabase.auth.getSession();
+      if (sessionError || !session) {
+        throw new Error("You must be signed in to add tasks.");
+      }
+
       const postTask = await fetch(
         `/api/educator/classes/${classId}/assignments/${assignmentId}/progress/tasks`,
         {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ title }),
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${session.access_token}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ title }),
         },
       );
 
@@ -228,11 +239,23 @@ export function AssignmentProgressTracker({
       if (!classId) {
         throw new Error("Missing class id for progress tracker.");
       }
+
+      const {
+        data: { session },
+        error: sessionError,
+      } = await supabase.auth.getSession();
+      if (sessionError || !session) {
+        throw new Error("You must be signed in to remove tasks.");
+      }
+
       const response = await fetch(
         `/api/educator/classes/${classId}/assignments/${assignmentId}/progress/tasks/${taskId}`,
         {
           method: "DELETE",
-          headers: { "Content-Type": "application/json" },
+          headers: {
+            Authorization: `Bearer ${session.access_token}`,
+            "Content-Type": "application/json",
+          },
         },
       );
 

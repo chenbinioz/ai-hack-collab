@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useStudentBrowserClient } from "@/lib/supabase/use-student-browser-client";
 import { createStudentBrowserClient } from "@/lib/supabase/student-browser-client";
 import { uploadAssignmentFile } from "@/lib/files/storage";
 import { formatFileSize, validateFile } from "@/lib/files/validation";
@@ -35,7 +36,7 @@ export function AssignmentAttachmentsPanel({
   pendingFiles = [],
   onPendingFilesChange,
 }: AssignmentAttachmentsPanelProps) {
-  const supabase = createStudentBrowserClient();
+  const supabase = useStudentBrowserClient();
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [attachments, setAttachments] = useState<AssignmentAttachment[]>([]);

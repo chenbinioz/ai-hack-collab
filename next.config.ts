@@ -1,5 +1,6 @@
 import { loadEnvConfig } from "@next/env";
 import type { NextConfig } from "next";
+import { resolveBackendUrlFromEnv } from "./lib/api/backend-constants";
 
 // Load `.env` / `.env.local` before reading `process.env` here (Next does not always
 // evaluate env files before this module runs in all tooling paths).
@@ -22,8 +23,7 @@ const nextConfig: NextConfig = {
   env: {
     NEXT_PUBLIC_SUPABASE_URL: studentSupabaseUrl,
     NEXT_PUBLIC_SUPABASE_ANON_KEY: studentSupabaseAnonKey,
-    NEXT_PUBLIC_API_URL:
-      process.env.NEXT_PUBLIC_API_URL?.trim() || "http://127.0.0.1:8000",
+    NEXT_PUBLIC_API_URL: resolveBackendUrlFromEnv(),
   },
 };
 

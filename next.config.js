@@ -10,12 +10,18 @@ const studentSupabaseAnonKey =
   (process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY && process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY.trim()) ||
   "";
 
+const productionBackendUrl = "https://ai-hack-collab.onrender.com";
+const resolvedApiUrl =
+  (process.env.NEXT_PUBLIC_API_URL && process.env.NEXT_PUBLIC_API_URL.trim()) ||
+  (process.env.BACKEND_URL && process.env.BACKEND_URL.trim()) ||
+  (process.env.VERCEL === "1" ? productionBackendUrl : "http://127.0.0.1:8000");
+
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   env: {
     NEXT_PUBLIC_SUPABASE_URL: studentSupabaseUrl,
     NEXT_PUBLIC_SUPABASE_ANON_KEY: studentSupabaseAnonKey,
-    NEXT_PUBLIC_API_URL: (process.env.NEXT_PUBLIC_API_URL && process.env.NEXT_PUBLIC_API_URL.trim()) || "http://localhost:8000",
+    NEXT_PUBLIC_API_URL: resolvedApiUrl,
   },
 };
 
