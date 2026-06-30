@@ -39,6 +39,22 @@ def _gemini_generate_timeout() -> int:
         return 180
 
 
+def _gemini_max_output_tokens() -> int:
+    raw = os.getenv("GEMINI_MAX_OUTPUT_TOKENS", "8192")
+    try:
+        return max(1024, int(raw))
+    except ValueError:
+        return 8192
+
+
+def _gemini_generation_config() -> dict:
+    return {
+        "maxOutputTokens": _gemini_max_output_tokens(),
+        "responseMimeType": "application/json",
+        "temperature": 0.2,
+    }
+
+
 def _is_gemini_timeout_error(exc: BaseException) -> bool:
     if isinstance(exc, (TimeoutError, socket.timeout)):
         return True
@@ -270,10 +286,17 @@ def _parse_model_json_response(response_json):
             text_fragments.append(maybe_text)
 
     raw_text = "\n".join(text_fragments).strip()
+    finish_reason = candidates[0].get("finishReason", "unknown")
+
+    if finish_reason == "MAX_TOKENS":
+        raise ValueError(
+            "Gemini output truncated (finishReason=MAX_TOKENS). "
+            f"Raw preview: {raw_text[:240]}"
+        )
+
     json_text = _extract_json_text(raw_text)
 
     if not json_text:
-        finish_reason = candidates[0].get("finishReason", "unknown")
         raise ValueError(
             "Gemini returned no JSON text for matching output "
             f"(finishReason={finish_reason}). Raw preview: {raw_text[:240]}"
@@ -284,7 +307,7 @@ def _parse_model_json_response(response_json):
     except json.JSONDecodeError as e:
         raise ValueError(
             "Gemini returned malformed JSON for matching output: "
-            f"{e}. JSON preview: {json_text[:240]}"
+            f"{e} (finishReason={finish_reason}). JSON preview: {json_text[:240]}"
         ) from e
 
 
@@ -668,7 +691,8 @@ def _call_gemini_with_retries(prompt, active_key, model_name, max_attempts=4):
                             {"text": prompt}
                         ]
                     }
-                ]
+                ],
+                "generationConfig": _gemini_generation_config(),
             }
             request = urllib.request.Request(
                 endpoint,
@@ -756,6 +780,63 @@ def _call_gemini_with_model_failover(prompt, active_key):
         f"Tried: {', '.join(models)}. "
         f"Last errors: {' | '.join(failures)}"
     )
+
+
+def _is_retryable_matching_json_error(message: str) -> bool:
+    lowered = message.lower()
+    return (
+        "malformed json" in lowered
+        or "no json text" in lowered
+        or "max_tokens" in lowered
+        or "truncated" in lowered
+    )
+
+
+def _call_gemini_for_matching_json(prompt, active_key, max_parse_attempts=3):
+    """
+    Call Gemini with model failover and retry when the model returns truncated or invalid JSON.
+    """
+    models = _effective_model_candidates(active_key)
+    failures = []
+
+    for model_name in models:
+        for parse_attempt in range(1, max_parse_attempts + 1):
+            try:
+                response_json = _call_gemini_with_retries(
+                    prompt,
+                    active_key,
+                    model_name,
+                    max_attempts=2 if parse_attempt > 1 else 4,
+                )
+                return _parse_model_json_response(response_json), model_name
+            except ValueError as e:
+                message = str(e)
+                if _is_retryable_matching_json_error(message) and parse_attempt < max_parse_attempts:
+                    sleep_seconds = 0.5 + random.uniform(0, 0.75)
+                    print(
+                        f"Gemini JSON parse retry for '{model_name}' in {sleep_seconds:.2f}s "
+                        f"(attempt {parse_attempt}/{max_parse_attempts}): {message[:160]}"
+                    )
+                    time.sleep(sleep_seconds)
+                    continue
+                failures.append(f"{model_name}: {message}")
+                print(f"Gemini model failover: '{model_name}' returned unusable JSON, trying next model.")
+                break
+            except RuntimeError as e:
+                failures.append(f"{model_name}: {e}")
+                print(f"Gemini model failover: '{model_name}' failed, trying next model.")
+                break
+            except (TimeoutError, socket.timeout) as e:
+                failures.append(f"{model_name}: {_gemini_timeout_error_text(e)}")
+                print(f"Gemini model failover: '{model_name}' timed out, trying next model.")
+                break
+
+    raise RuntimeError(
+        "All configured Gemini models failed. "
+        f"Tried: {', '.join(models)}. "
+        f"Last errors: {' | '.join(failures)}"
+    )
+
 
 def get_recent_feedback_patterns():
     """
@@ -1004,7 +1085,7 @@ def match_students(students, ai_preferences=None, class_context=None):
         )
     prompt_parts.append(f"\n\nStudent data (JSON format):\n{profiles_json}\n\n")
     prompt_parts.append(
-        "Create balanced groups and return ONLY valid JSON with this schema: "
+        "Create balanced groups and return ONLY compact valid JSON with this schema: "
         "{"
         "\"factor_weights\": {"
         "\"previous_experience\": number,"
@@ -1016,14 +1097,11 @@ def match_students(students, ai_preferences=None, class_context=None):
         "},"
         "\"groups\": [{"
         "\"members\": [\"id1\", \"id2\"],"
-        "\"reason\": \"short summary of why this group works\","
-        "\"match_trace\": [{"
-        "\"factor\": \"previous_experience\","
-        "\"label\": \"Previous subject experience\","
-        "\"evidence\": \"specific reason using the input profile data\""
+        "\"reason\": \"one sentence under 120 characters\""
         "}]"
-        "}]"
-        "}."
+        "}. "
+        "Do NOT include match_trace; the server generates explainability traces from each reason. "
+        "Use student UUIDs exactly as provided. Keep JSON minified with no markdown fences."
     )
 
     prompt = "\n".join(prompt_parts)
@@ -1032,10 +1110,9 @@ def match_students(students, ai_preferences=None, class_context=None):
 
     try:
         # AI-only matching with per-model retries and cross-model failover.
-        response_json, model_used = _call_gemini_with_model_failover(prompt, active_key)
+        parsed, model_used = _call_gemini_for_matching_json(prompt, active_key)
         print(f"Gemini matching succeeded using model: {model_used}")
 
-        parsed = _parse_model_json_response(response_json)
         normalized = _normalize_matches(parsed, ai_preferences)
         ideal_team_size = class_context.get("ideal_team_size") or class_context.get("max_team_size")
         roster_ids = [student.get("id") for student in students if student.get("id")]
