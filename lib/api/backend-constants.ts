@@ -16,5 +16,7 @@ export function resolveBackendUrlFromEnv(): string {
     return PRODUCTION_BACKEND_URL;
   }
 
-  return "http://127.0.0.1:8000";
+  // Default to the live Render backend so team generation works without a local uvicorn process.
+  // Set NEXT_PUBLIC_API_URL=http://localhost:8000 to use a local backend instead.
+  return PRODUCTION_BACKEND_URL;
 }

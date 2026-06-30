@@ -36,7 +36,7 @@ export async function POST(
     return NextResponse.json(
       {
         error:
-          "Team generation service is unavailable. Start the backend with: cd backend && uvicorn main:app --reload",
+          "Could not reach the team generation service. Check that the Render backend is running and BACKEND_URL is set correctly.",
       },
       { status: 503 },
     );

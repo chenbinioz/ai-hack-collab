@@ -118,7 +118,7 @@ function formatGenerateTeamsError(payload: unknown, fallback: string): string {
   return fallback;
 }
 
-function formatFetchFailure(err: unknown, fallback: string): string {
+function formatFetchFailure(err: unknown, fallback: string, backendUrl?: string): string {
   if (!(err instanceof Error)) {
     return fallback;
   }
@@ -129,10 +129,43 @@ function formatFetchFailure(err: unknown, fallback: string): string {
     message === "Failed to fetch" ||
     message.includes("NetworkError")
   ) {
-    return "Team generation service is unavailable. Start the backend with: cd backend && uvicorn main:app --reload";
+    const target = backendUrl ?? getPublicBackendUrl();
+    return `Could not reach the team generation service at ${target}. Check that the Render backend is running, or set NEXT_PUBLIC_API_URL in your environment.`;
   }
 
   return message;
+}
+
+async function postGenerateTeams(
+  classId: string,
+  assignmentId: string,
+  accessToken: string,
+): Promise<Response> {
+  const headers = {
+    Authorization: `Bearer ${accessToken}`,
+    "Content-Type": "application/json",
+  };
+  const timeoutSignal = AbortSignal.timeout(5 * 60 * 1000);
+  const directUrl = `${getPublicBackendUrl()}/educator/classes/${classId}/assignments/${assignmentId}/generate-teams`;
+
+  try {
+    return await fetch(directUrl, {
+      method: "POST",
+      headers,
+      signal: timeoutSignal,
+    });
+  } catch (directError) {
+    const proxyUrl = `/api/educator/classes/${classId}/assignments/${assignmentId}/generate-teams`;
+    try {
+      return await fetch(proxyUrl, {
+        method: "POST",
+        headers,
+        signal: timeoutSignal,
+      });
+    } catch {
+      throw directError;
+    }
+  }
 }
 
 const factorLabelMap: Record<string, string> = {
@@ -349,6 +382,7 @@ export function AssignmentCard({
   };
 
   const handleGenerateTeams = async () => {
+    const backendUrl = getPublicBackendUrl();
     try {
       setIsGeneratingTeams(true);
       setError(null);
@@ -364,17 +398,7 @@ export function AssignmentCard({
         ai_preferences: aiPreferences,
       });
 
-      const targetUrl = `${getPublicBackendUrl()}/educator/classes/${classId}/assignments/${assignment.id}/generate-teams`;
-
-      const response = await fetch(targetUrl, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${session.access_token}`,
-          "Content-Type": "application/json",
-        },
-        // Team generation can take several minutes (Gemini + large classes).
-        signal: AbortSignal.timeout(5 * 60 * 1000),
-      });
+      const response = await postGenerateTeams(classId, assignment.id, session.access_token);
 
       const payload = await response.json().catch(() => ({}));
       const draftTeamIds = Array.isArray(payload?.draft_team_ids) ? payload.draft_team_ids : [];
@@ -415,7 +439,7 @@ export function AssignmentCard({
 
       await onRefresh({ silent: true });
     } catch (err: unknown) {
-      setError(formatFetchFailure(err, "Failed to generate teams"));
+      setError(formatFetchFailure(err, "Failed to generate teams", backendUrl));
     } finally {
       setIsGeneratingTeams(false);
     }
